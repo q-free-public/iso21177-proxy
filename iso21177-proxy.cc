@@ -28,24 +28,26 @@
 
 #include "utils.h"
 #include "iso21177-proxy.h"
+#include "http-headers.h"
 
 int optVerbose = 0;  // Separate redundant variable for compatibility with utils.cc
-int optGpsdPort = 8080;
+int optProxyPlainPort = 8080;
 const char iso21177_proxy_vsn_string[] = "v0.1 " __DATE__ " " __TIME__;
+std::vector<ProxyClient> clientList;
 
-void proxyAcceptProc(void *ublox);
+void proxyPlainAcceptProc(void *ublox);
 
 void usage(const char *argv0)
 {
 	std::string prog = "/" + std::string(argv0);
 	prog = prog.substr(prog.rfind("/") + 1);
 //	UbloxSettings defaults;
-	
+
    printf("Usage: %s [-v] [-V] [-d device]\n", prog.c_str());
    printf("   -V                     print version\n");
    printf("   -h                     print this usage information\n");
    printf("   -v                     verbose (can be repeated to get more debug output), output goes to stderr.\n");
-   printf("   -p n                   Port number (default is %d)\n", optGpsdPort);
+   printf("   -p n                   Port number for HTTP (default is %d)\n", optProxyPlainPort);
 }
 
 void parseargs(int argc, char *argv[])
@@ -61,7 +63,7 @@ void parseargs(int argc, char *argv[])
          usage(argv[0]);
          exit(0);
       } else if (strcmp(argv[i], "-p") == 0  && i<argc-1) {
-         optGpsdPort = atoi(argv[i+1]);
+         optProxyPlainPort = atoi(argv[i+1]);
          i++;
       } else {
          printf("Illegal command line option '%s'\n", argv[i]);
@@ -81,9 +83,9 @@ int main(int argc, char *argv[])
    }
 
 #if 1
-	proxyAcceptProc((void*)0);
+	proxyPlainAcceptProc((void*)0);
 #else
-   std::thread gpsdAcceptThread(proxyAcceptProc, (void*)0);
+   std::thread gpsdAcceptThread(proxyPlainAcceptProc, (void*)0);
 	// detach() let thread run until process is terminated without any resource cleanup by the application. The OS will handle everything.
 	gpsdAcceptThread.detach();
 #endif
@@ -91,38 +93,246 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-void gpsdClientProc(void *ublox, int fd)
+void send(int fd, const std::string &hdr, const unsigned char *body, unsigned int body_len)
+{
+	if (optVerbose) {
+		fprintf(stderr, "Sending Header: %s\nFollowed by %u bytes body.\n", hdr.c_str(), body_len);
+	}
+
+	int pos = 0;
+	int len = hdr.size();
+	while (pos < len) {
+		int ret = write(fd, hdr.c_str() + pos, len);
+		if (optVerbose) {
+			fprintf(stderr, "Sending %d bytes on fd=%d  -->  sent %d\n", len, fd, ret);
+		}
+		if (ret <= 0) {
+			return;
+		}
+		pos += ret;
+		len -= ret;
+	}
+
+	pos = 0;
+	len = body_len;
+	while (pos < len) {
+		int ret = write(fd, body + pos, len);
+		if (optVerbose) {
+			fprintf(stderr, "Sending %d bytes on fd=%d  -->  sent %d\n", len, fd, ret);
+		}
+		if (ret <= 0) {
+			return;
+		}
+		pos += ret;
+		len -= ret;
+	}
+}
+
+void send(int fd, const std::string &hdr, const std::string &body)
+{
+	send(fd, hdr, (const unsigned char *)body.c_str(), body.size());
+}
+
+void emit_error(int fd, int code, const std::string &text)
+{
+	std::string body;
+	body += "<html>\r\n";
+	body += "Unsupported request<p>\r\n";
+	body += "Error code " + std::to_string(code) + "<p>\r\n";
+	body += text + "\r\n";
+	body += "</html>\r\n";
+
+	std::string hdr;
+	hdr += "HTTP/1.1 " + std::to_string(code) + " Error\r\n";
+	hdr += "Content-Type: text/html\r\n";
+	hdr += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+	hdr += "\r\n";
+	send(fd, hdr, body);
+}
+
+void handle_get_html(int fd, int size)
+{
+	const std::string source = "Q-Free is a prime mover in the world of smart, safe, and sustainable transportation management. We go to work every day hoping to do two things: improve mobility and make the world a little better. Collectively, we channel our energy to influence and develop the global ITS community. We improve traffic flow, road safety, and air quality in communities all over the world. ";
+	std::string body;
+	body += "<html>\r\n";
+	while ((int)body.size() < size) {
+		body += source;
+	}
+	if ((int)body.size() > size)
+		body = body.substr(0, size);
+	body += "</html>\r\n";
+
+	std::string hdr;
+	hdr += "HTTP/1.1 200 OK\r\n";
+	hdr += "Content-Type: text/html\r\n";
+	hdr += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+	hdr += "\r\n";
+	send(fd, hdr, body);
+}
+
+void handle_get_text(int fd, int size)
+{
+	const std::string source = "Q-Free is a prime mover in the world of smart, safe, and sustainable transportation management.\r\n";
+	std::string body;
+	while ((int)body.size() < size) {
+		body += source;
+	}
+	if ((int)body.size() > size)
+		body = body.substr(0, size);
+
+	std::string hdr;
+	hdr += "HTTP/1.1 200 OK\r\n";
+	hdr += "Content-Type: text/plain\r\n";
+	hdr += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+	hdr += "\r\n";
+	send(fd, hdr, body);
+}
+
+void handle_get_bin(int fd, int size)
+{
+	std::vector<unsigned char> body;
+	unsigned char ch = 0;
+	while ((int)body.size() < size) {
+		body.push_back(ch++);
+	}
+
+	std::string hdr;
+	hdr += "HTTP/1.1 200 OK\r\n";
+	hdr += "Content-Type: application/octet-stream\r\n";
+	hdr += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+	hdr += "\r\n";
+	send(fd, hdr, body.data(), body.size());
+}
+
+void handle_get(int fd, const std::string &file)
+{
+	if (optVerbose) {
+		fprintf(stderr, "Handle get: %s\n", file.c_str());
+	}
+
+	int size, cnt;
+
+	// Request HTML file of abritary length
+	cnt = sscanf(file.c_str(), "/%d.html", &size);
+	fprintf(stderr, "cnt %d   find %d\n", cnt, (int) file.find(".html"));
+	if (cnt == 1 && file.find(".html") != std::string::npos && size > 0) {
+		if (size < 100) size = 100;
+		if (size > 1000000) size = 1000000;
+		handle_get_html(fd, size);
+		return;
+	}
+
+	cnt = sscanf(file.c_str(), "/%d.text", &size);
+	if (cnt == 1 && file.find(".text") != std::string::npos && size > 0) {
+		if (size < 100) size = 100;
+		if (size > 1000000) size = 1000000;
+		handle_get_text(fd, size);
+		return;
+	}
+
+	cnt = sscanf(file.c_str(), "/%d.bin", &size);
+	if (cnt == 1 && file.find(".bin") != std::string::npos && size > 0) {
+		if (size < 100) size = 100;
+		if (size > 1000000) size = 1000000;
+		handle_get_bin(fd, size);
+		return;
+	}
+
+	emit_error(fd, 400, "Illegal URL");
+}
+
+void addClient(std::thread *pThread, int fd, const struct sockaddr_in6 &addrClient)
+{
+   ProxyClient client;
+   client.pThread = pThread;
+   client.fd = fd;
+   client.addrClient = addrClient;
+   char buffer[INET6_ADDRSTRLEN];
+   int err = getnameinfo((struct sockaddr*)&addrClient,sizeof(addrClient),buffer,sizeof(buffer), 0,0,NI_NUMERICHOST);
+   if (err==0) {
+      client.addrClientStr = buffer;
+      client.addrClientStr += ",";
+      client.addrClientStr += std::to_string(ntohs(addrClient.sin6_port));
+   }
+   client.completed = false;
+   client.closeTime = 0;
+   time(&client.openTime);
+   clientList.push_back(client);
+}
+
+void removeClient(int fd)
+{
+   for (auto it=clientList.begin(); it!=clientList.end(); ++it) {
+      if (it->fd == fd) {
+         // fprintf(stderr, "Mark client as completed\n");
+         it->completed = true;
+         it->fd = -1;
+         time(&it->closeTime);
+         return;
+      }
+   }
+   fprintf(stderr, "client with fd=%d not found\n", fd);
+}
+
+void cleanupClients()
+{
+   for (auto it=clientList.begin(); it!=clientList.end(); ++it) {
+      if (it->completed) {
+         // fprintf(stderr, "Remove client from list\n");
+         it->pThread->join();
+         delete it->pThread;
+         clientList.erase(it);
+         break;
+      }
+   }
+}
+
+void proxyPlainClientProc(void *ublox, int fd)
 {
    if (optVerbose) {
-      fprintf(stderr, "Starting gpsdClientProcess fd=%d\n", fd);
+      fprintf(stderr, "Starting proxyPlainClientProc fd=%d\n", fd);
    }
-   while (true) {
+
+	HttpHeaders headers;
+   while (!headers.is_complete()) {
       char buf[1000];
       int len = read(fd, buf, sizeof(buf)-1);
       if (len == 0) {
          break;
-      } 
+      }
       if (len < 0) {
          if (optVerbose) {
-            perror("gpsdClientProc: read error");
+            perror("proxyPlainClientProc: read error");
          }
          break;
-      } 
-      buf[len] = 0;
-      if (optVerbose) {
-         fprintf(stderr, "Read %d bytes from client: %s\n", len, buf);
       }
-      //ublox->gpsdClientCommand(fd, buf);
+		headers.add_data(buf, len);
    }
+
+   if (optVerbose) {
+		fprintf(stderr, "Header is complete\n");
+		for (auto &line : headers.headerlines) {
+			fprintf(stderr, "%s\n", line.c_str());
+		}
+		fprintf(stderr, "Verb:  %s\n", headers.get_verb().c_str());
+		fprintf(stderr, "Proto: %s\n", headers.get_protocol().c_str());
+		fprintf(stderr, "File:  %s\n", headers.get_file().c_str());
+   }
+
+	if (headers.get_verb() == "GET") {
+		handle_get(fd, headers.get_file());
+	} else {
+		emit_error(fd, 500, "Illegal verb: " + headers.get_verb());
+	}
 
    if (optVerbose) {
       fprintf(stderr, "Closing socket %d\n", fd);
    }
-   //ublox->removeClient(fd);
+   removeClient(fd);
    close(fd);
 }
 
-void proxyAcceptProc(void *ublox)
+void proxyPlainAcceptProc(void *ublox)
 {
    int nFdSocket = socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP);
    if (nFdSocket == -1) {
@@ -140,11 +350,11 @@ void proxyAcceptProc(void *ublox)
    struct sockaddr_in6 addrLocal6;
    memset(&addrLocal6, 0, sizeof(addrLocal6));
    addrLocal6.sin6_family = AF_INET6;
-   addrLocal6.sin6_port = htons(optGpsdPort);
+   addrLocal6.sin6_port = htons(optProxyPlainPort);
    addrLocal6.sin6_addr = in6addr_any;
    status = bind(nFdSocket, (struct sockaddr*) &addrLocal6, sizeof(addrLocal6));
    if (status == -1) {
-      send2log(LOG_ERR, "bind(TCP,port=%d) failed: %s", optGpsdPort, strerror(errno));
+      send2log(LOG_ERR, "bind(TCP,port=%d) failed: %s", optProxyPlainPort, strerror(errno));
       exit(12);
    }
 
@@ -166,16 +376,16 @@ void proxyAcceptProc(void *ublox)
          if (optVerbose) {
             fprintf(stderr, "Starting thread for new incoming connection fd=%d  ptr=%p\n", fdClient, ublox);
          }
-         std::thread *gpsdClientThread = new std::thread(gpsdClientProc, ublox, fdClient);
-			gpsdClientThread->detach();
-         //ublox->addClient(gpsdClientThread, fdClient, addrClient);
+         std::thread *gpsdClientThread = new std::thread(proxyPlainClientProc, ublox, fdClient);
+         addClient(gpsdClientThread, fdClient, addrClient);
       } else {
          if (optVerbose) {
-            perror("proxyAcceptProc: accept");
+            perror("proxyPlainAcceptProc: accept");
          }
          break;
       }
-      //ublox->cleanupClients();
+      cleanupClients();
    }
+
    fprintf(stderr, "Exiting accept loop.\n");
 }

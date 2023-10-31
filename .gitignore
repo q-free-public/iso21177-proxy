@@ -12,5 +12,9 @@
 # Compiled Static libraries
 *.a
 
+# linked files
+utils.cc
+utils.h
+
 # Executables
 iso21177-proxy

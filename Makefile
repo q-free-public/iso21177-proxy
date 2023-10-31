@@ -8,7 +8,7 @@ CXXOPTS+=-Wall -std=c++14
 
 all: iso21177-proxy
 
-iso21177-proxy.o: iso21177-proxy.cc iso21177-proxy.h utils.h
+iso21177-proxy.o: iso21177-proxy.cc iso21177-proxy.h utils.h http-headers.h
 utils.o: utils.cc utils.h
 
 iso21177-proxy: iso21177-proxy.o utils.o

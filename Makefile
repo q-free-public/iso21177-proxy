@@ -20,7 +20,8 @@ install: iso21177-proxy
 	install iso21177-proxy ${INSTALL_BIN_DIR}
 	install -d ${INSTALL_SYSTEMD_DIR}
 	install -m 0644 iso-21177-proxy.service ${INSTALL_SYSTEMD_DIR}
-	sudo systemctl restart iso-21177-proxy
+	systemctl daemon-reload
+	systemctl restart iso-21177-proxy
 
 
 clean:

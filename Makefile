@@ -1,5 +1,6 @@
 
 INSTALL_BIN_DIR=${DESTDIR}/usr/bin/
+INSTALL_SYSTEMD_DIR=${DESTDIR}/lib/systemd/system
 COPTS+=-Wall -std=c++14
 CXXOPTS+=-Wall -std=c++14
 
@@ -17,6 +18,10 @@ iso21177-proxy: iso21177-proxy.o utils.o
 install: iso21177-proxy
 	mkdir -p ${INSTALL_BIN_DIR}
 	install iso21177-proxy ${INSTALL_BIN_DIR}
+	install -d ${INSTALL_SYSTEMD_DIR}
+	install -m 0644 iso-21177-proxy.service ${INSTALL_SYSTEMD_DIR}
+	sudo systemctl restart iso-21177-proxy
+
 
 clean:
 	rm -f *.o iso21177-proxy

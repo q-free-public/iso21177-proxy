@@ -298,6 +298,9 @@ void proxyPlainClientProc(void *ublox, int fd)
       char buf[1000];
       int len = read(fd, buf, sizeof(buf)-1);
       if (len == 0) {
+         if (optVerbose) {
+            printf("proxyPlainClientProc: eof?  len=%d\n", len);
+         }
          break;
       }
       if (len < 0) {
@@ -306,24 +309,31 @@ void proxyPlainClientProc(void *ublox, int fd)
          }
          break;
       }
+         if (optVerbose > 1) {
+            printf("proxyPlainClientProc: Len:%d  Header: %*.*s\n", len, len, len, buf);
+         }
 		headers.add_data(buf, len);
    }
 
-   if (optVerbose) {
-		fprintf(stderr, "Header is complete\n");
-		for (auto &line : headers.headerlines) {
+   try {
+      if (optVerbose) {
+		 fprintf(stderr, "Header is complete\n");
+		 for (auto &line : headers.headerlines) {
 			fprintf(stderr, "%s\n", line.c_str());
-		}
-		fprintf(stderr, "Verb:  %s\n", headers.get_verb().c_str());
-		fprintf(stderr, "Proto: %s\n", headers.get_protocol().c_str());
-		fprintf(stderr, "File:  %s\n", headers.get_file().c_str());
-   }
+		 }
+		 fprintf(stderr, "Verb:  %s\n", headers.get_verb().c_str());
+		 fprintf(stderr, "Proto: %s\n", headers.get_protocol().c_str());
+		 fprintf(stderr, "File:  %s\n", headers.get_file().c_str());
+      }
 
-	if (headers.get_verb() == "GET") {
-		handle_get(fd, headers.get_file());
-	} else {
-		emit_error(fd, 500, "Illegal verb: " + headers.get_verb());
-	}
+	  if (headers.get_verb() == "GET") {
+		 handle_get(fd, headers.get_file());
+	  } else {
+		 emit_error(fd, 500, "Illegal verb: " + headers.get_verb());
+	  }
+   } catch (const char *msg) {
+      printf("Catched execption: %s\n", msg);
+   }
 
    if (optVerbose) {
       fprintf(stderr, "Closing socket %d\n", fd);

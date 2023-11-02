@@ -7,13 +7,19 @@ CXXOPTS+=-Wall -std=c++14
 %.o: %.cc
 	$(CXX) $(CXXOPTS) -O -c $<
 
-all: iso21177-proxy
+all: iso21177-proxy openssl-test
 
 iso21177-proxy.o: iso21177-proxy.cc iso21177-proxy.h utils.h http-headers.h
 utils.o: utils.cc utils.h
 
+openssl-test.o: openssl-test.cc
+	$(CXX) $(CXXOPTS) -O -c $<
+
 iso21177-proxy: iso21177-proxy.o utils.o
 	$(CXX) $^ $(LDFLAGS) -lpthread -o iso21177-proxy
+
+openssl-test: openssl-test.o
+	$(CXX) $^ $(LDFLAGS) -lssl -lcrypto -o openssl-test
 
 install: iso21177-proxy
 	mkdir -p ${INSTALL_BIN_DIR}
@@ -25,7 +31,7 @@ install: iso21177-proxy
 
 
 clean:
-	rm -f *.o iso21177-proxy
+	rm -f *.o iso21177-proxy openssl-test
 	rm -f utils.cc utils.h
 
 #

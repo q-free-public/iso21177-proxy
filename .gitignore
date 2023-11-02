@@ -18,3 +18,4 @@ utils.h
 
 # Executables
 iso21177-proxy
+openssl-test

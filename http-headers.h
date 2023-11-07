@@ -2,20 +2,25 @@
 
 #include <string>
 #include <list>
+#include <vector>
 
 class HttpHeaders {
 public:
-	void add_data(char *buf, int len) {
+	std::vector<unsigned char> add_data(char *buf, int len) {
 		for (int i=0; i<len; i++) {
-			if (buf[i] == '\r') {
+			if (buf[i] == '\n') {
 				headerlines.push_back(line);
+				if (line.empty())
+					return std::vector<unsigned char>(buf + i+1, buf + len);
 				line.clear();
-			} else if (buf[i] == '\n') {
+			} else if (buf[i] == '\r') {
 				// ignore
 			} else {
 				line += buf[i];
 			}
 		}
+		
+		return std::vector<unsigned char>();
 	}
 
 	bool is_complete() {
@@ -53,6 +58,18 @@ public:
 		return parts[2];
 	}
 
+	int get_content_length()
+	{
+		const std::string tag("Content-Length:");
+		for (auto &h : headerlines) {
+			if (h.find(tag) == 0) {
+				int len = std::stoi(h.substr(tag.size()));
+				return len;
+			}
+		}
+		return -1;
+	}
+	
 	std::vector<std::string> split_on_space(const std::string &str)
 	{
 		return split(str, " ");

@@ -9,13 +9,14 @@ CXXOPTS+=-Wall -std=c++14
 
 all: iso21177-proxy openssl-test
 
-iso21177-proxy.o: iso21177-proxy.cc iso21177-proxy.h utils.h http-headers.h
+iso21177-proxy.o: iso21177-proxy.cc iso21177-proxy.h utils.h proxy-client.h
 utils.o: utils.cc utils.h
+proxy-client.o: proxy-client.cc proxy-client.h http-headers.h 
 
 openssl-test.o: openssl-test.cc
 	$(CXX) $(CXXOPTS) -O -c $<
 
-iso21177-proxy: iso21177-proxy.o utils.o
+iso21177-proxy: iso21177-proxy.o utils.o proxy-client.o
 	$(CXX) $^ $(LDFLAGS) -lpthread -o iso21177-proxy
 
 openssl-test: openssl-test.o

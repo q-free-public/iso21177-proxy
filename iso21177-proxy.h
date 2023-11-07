@@ -2,19 +2,30 @@
  * iso21177-proxy.h
  */
 
-class ProxyClient
+#pragma once
+
+#include <string>
+#include <list>
+
+class ProxyRule
 {
 public:
-   std::thread *pThread;
-   int          fd;
-   struct sockaddr_in6 addrClient;
-   std::string  addrClientStr;
-   time_t       openTime;
-   time_t       closeTime;
-   bool         completed;
-   long         recvPck;
-   long         recvBytes;
-   long         sendPck;
-   long         sendBytes;
+	ProxyRule(const std::string &_src_file, const std::string &_dst_host, const int _dst_port, const std::string &_dst_file) :
+		src_file(_src_file),
+		dst_host(_dst_host),
+		dst_port(_dst_port),
+		dst_file(_dst_file)
+	{}
+	
+	const std::string  src_file;
+	const std::string  dst_host;
+	const int          dst_port;
+	const std::string  dst_file;
 };
 
+
+extern std::list<ProxyRule>  rules;
+extern int                   optVerbose;
+
+extern void        removeClient(int fd);
+extern const char *bin2hex(unsigned char *bin, unsigned int len);

@@ -14,6 +14,8 @@
 
 #include "iso21177-proxy.h"
 
+class ConnectionClient;
+
 class ProxyClient
 {
 public:
@@ -41,9 +43,7 @@ protected:
 	void handle_get_html(int size);
 	void handle_get_text(int size);
 	void handle_get_bin(int size);
-	void handle_get_proxy(const std::string &file, const ProxyRule &rule);
+	void handle_get_proxy(ConnectionClient *conn, const std::string &file, const ProxyRule &rule);
 	void handle_get(const std::string &file);
-
-	int tcp_connect(const std::string &file, const ProxyRule &rule);
 };
 

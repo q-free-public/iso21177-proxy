@@ -5,11 +5,12 @@
 
 #include "proxy-client.h"
 #include "http-headers.h"
+#include "connection-client.h"
 
 void ProxyClient::client_proc()
 {
    if (optVerbose) {
-      fprintf(stderr, "Starting proxyPlainClientProc fd=%d\n", fd);
+      printf("Starting proxyPlainClientProc fd=%d\n", fd);
    }
 
 	// Read request from HTTP client
@@ -30,7 +31,7 @@ void ProxyClient::client_proc()
          break;
       }
 		if (optVerbose > 1) {
-			printf("proxyPlainClientProc: Len:%d  Header: %*.*s\n", len, len, len, buf);
+			//printf("proxyPlainClientProc: Len:%d  Header: %*.*s\n", len, len, len, buf);
 		}
 		recvBytes += len;
 		headers.add_data(buf, len);
@@ -38,13 +39,15 @@ void ProxyClient::client_proc()
 
    try {
       if (optVerbose) {
-			fprintf(stderr, "Header is complete\n");
-			for (auto &line : headers.headerlines) {
-				fprintf(stderr, "%s\n", line.c_str());
+			printf("Header is complete\n");
+			if (optVerbose > 1) {
+				for (auto &line : headers.headerlines) {
+					printf("%s\n", line.c_str());
+				}
 			}
-		   fprintf(stderr, "Verb:  %s\n", headers.get_verb().c_str());
-		   fprintf(stderr, "Proto: %s\n", headers.get_protocol().c_str());
-		   fprintf(stderr, "File:  %s\n", headers.get_file().c_str());
+		   printf("Verb:  %s\n", headers.get_verb().c_str());
+		   printf("Proto: %s\n", headers.get_protocol().c_str());
+		   printf("File:  %s\n", headers.get_file().c_str());
       }
 
 	   if (headers.get_verb() == "GET") {
@@ -57,10 +60,11 @@ void ProxyClient::client_proc()
    }
 
    if (optVerbose) {
-      fprintf(stderr, "Closing socket %d\n", fd);
+      printf("Closing socket %d\n", fd);
    }
    removeClient(fd);
    close(fd);
+	fd = -1;
 }
 
 void ProxyClient::send(int sd, const void *data_p, unsigned int len)
@@ -70,7 +74,7 @@ void ProxyClient::send(int sd, const void *data_p, unsigned int len)
 	while (pos < len) {
 		int ret = write(sd, data + pos, len);
 		if (optVerbose) {
-			fprintf(stderr, "Sending %u bytes on fd=%d  -->  sent %d\n", len, sd, ret);
+			printf("Sending %u bytes on fd=%d  -->  sent %d\n", len, sd, ret);
 		}
 		if (ret <= 0) {
 			return;
@@ -83,7 +87,7 @@ void ProxyClient::send(int sd, const void *data_p, unsigned int len)
 void ProxyClient::send(const std::string &hdr, const unsigned char *body, unsigned int body_len)
 {
 	if (optVerbose) {
-		fprintf(stderr, "Sending Header: %s\nFollowed by %u bytes body.\n", hdr.c_str(), body_len);
+		printf("Sending Header: %s\nFollowed by %u bytes body.\n", hdr.c_str(), body_len);
 	}
 
 	send(fd, hdr.c_str(), hdr.size());
@@ -166,99 +170,25 @@ void ProxyClient::handle_get_bin(int size)
 	send(hdr, body.data(), body.size());
 }
 
-int ProxyClient::tcp_connect(const std::string &file, const ProxyRule &rule)
+void ProxyClient::handle_get_proxy(ConnectionClient *conn, const std::string &file, const ProxyRule &rule)
 {
-   // Set destination address
-   int addrLen = 0;
-   struct sockaddr_in6 destAddress;
-   memset(&destAddress, 0, sizeof(destAddress));
-   {
-      struct addrinfo *res = 0;
-      struct addrinfo hints;
-      memset(&hints, 0, sizeof(hints));
-      hints.ai_family = AF_UNSPEC;
-      int status = getaddrinfo(rule.dst_host.c_str(), 0, &hints, &res);
-      // fprintf(stderr, "After getaddrinfo status %d   res->ai_family %d\n", status, res==0 ? -1 : res->ai_family);
-      if (status == 0 && res->ai_family == AF_INET6) {
-         memcpy(&destAddress, res->ai_addr, res->ai_addrlen);
-         freeaddrinfo(res);
-         destAddress.sin6_port = htons(rule.dst_port);
-         addrLen = sizeof(struct sockaddr_in6);
-      } else if (status == 0 && res->ai_family == AF_INET) {
-         struct sockaddr_in * destAddress4 = (struct sockaddr_in *) &destAddress;
-         memcpy(destAddress4, res->ai_addr, res->ai_addrlen);
-         freeaddrinfo(res);
-         destAddress4->sin_port = htons(rule.dst_port);
-         addrLen = sizeof(struct sockaddr_in);
-      } else {
-         if (optVerbose) {
-            fprintf(stderr, "getaddrinfo(%s) failed: %s\n", rule.dst_host.c_str(), gai_strerror(status));
-         }
-         errno = EADDRNOTAVAIL;
-         return -1;
-      }
-   }
-
-   // Create socket
-   int rem_fd = socket(destAddress.sin6_family, SOCK_STREAM, IPPROTO_TCP);
-   if (rem_fd == -1) {
-      fprintf(stderr, "socket(UDP) failed: %s\n", strerror(errno));
-      return -1;
-   }
-
-   int opts = 1;
-   int status = setsockopt(rem_fd, SOL_SOCKET, SO_REUSEADDR, (char *) &opts, sizeof(int));
-   if (status < 0) {
-      fprintf(stderr, "setsockopt(SO_REUSEADDR) failed: %s\n", strerror(errno));
-      close(rem_fd);
-      return -1;
-   }
-
-   if (optVerbose) {
-      char szHost[128];
-      int status = getnameinfo((struct sockaddr *)&destAddress, addrLen, szHost, sizeof(szHost), 0, 0, NI_NUMERICHOST);
-      if (status == 0) {
-         fprintf(stderr, "Connecting to %s\n", szHost);
-      }
-   }
-
-   // Connect to remote TCP server
-   int rc = connect(rem_fd, (struct sockaddr *) &destAddress, addrLen);
-   if (rc == -1) {
-		if (optVerbose) {
-         fprintf(stderr, "Connect to %s,%d failed: %s\n", rule.dst_host.c_str(), rule.dst_port, strerror(errno));
-      }
-      close(rem_fd);
-      return -1;
-   }
-
-   if (optVerbose) {
-      fprintf(stderr, "Connected to %s at port %d at socket %d\n", rule.dst_host.c_str(), rule.dst_port, rem_fd);
-   }
-
-	return rem_fd;
-}
-
-void ProxyClient::handle_get_proxy(const std::string &file, const ProxyRule &rule)
-{
-	int host_fd = tcp_connect(file, rule);
-	if (host_fd < 0) {
+	bool success = conn->connect(rule.dst_host, rule.dst_port);
+	if (!success) {
 		printf("Connection error to host %s\n", rule.dst_host.c_str());
 		emit_error(500, "Connection error to " + rule.dst_host);
+		return;
 	}
-	
-	printf("Send GET query to HTTP host\n");
+
+	printf("GET %s from %s\n", rule.dst_file.c_str(), rule.dst_host.c_str());
 	char szHttpRequest[500];
 	sprintf(szHttpRequest, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", rule.dst_file.c_str(), rule.dst_host.c_str());
-	send(host_fd, szHttpRequest, strlen(szHttpRequest));
-	printf("Wrote %d bytes\n", (int) strlen(szHttpRequest));
-	printf("Fetching: %s from %s\n", rule.dst_file.c_str(), rule.dst_host.c_str());
+	conn->send(szHttpRequest, strlen(szHttpRequest));
 
 	std::vector<unsigned char> body;
 	HttpHeaders headers;
    while (!headers.is_complete()) {
       unsigned char buf[1000];
-      int len = read(host_fd, buf, sizeof(buf)-1);
+      int len = conn->recv(buf, sizeof(buf)-1);
       if (len == 0) {
          if (optVerbose) {
             printf("handle_get_proxy: eof?  len=%d\n", len);
@@ -272,8 +202,9 @@ void ProxyClient::handle_get_proxy(const std::string &file, const ProxyRule &rul
          break;
       }
 		if (optVerbose > 1) {
-			printf("handle_get_proxy: Len:%d  Header: %*.*s\n", len, len, len, (char*)buf);
-			// fprintf(stderr, "%s\n", bin2hex(buf, len));
+			printf("handle_get_proxy: Len:%d bytes read from %s\n", len, rule.dst_host.c_str());
+			// printf("handle_get_proxy: Len:%d  Header: %*.*s\n", len, len, len, (char*)buf);
+			// printf("%s\n", bin2hex(buf, len));
 		}
 		recvBytes += len;
 		body = headers.add_data((char*)buf, len);
@@ -281,17 +212,18 @@ void ProxyClient::handle_get_proxy(const std::string &file, const ProxyRule &rul
 
    try {
       if (optVerbose) {
-			fprintf(stderr, "handle_get_proxy.Header is complete\n");
-			for (auto &line : headers.headerlines) {
-				fprintf(stderr, "%s\n", line.c_str());
+			printf("handle_get_proxy.Header is complete\n");
+			if (optVerbose > 1) {
+				for (auto &line : headers.headerlines) {
+					printf("%s\n", line.c_str());
+				}
 			}
-			fprintf(stderr, "handle_get_proxy.Body has %d bytes (so far)\n", (int) body.size());
-			fprintf(stderr, "%s\n", bin2hex(body.data(), (unsigned int)body.size()));
-			
+			printf("handle_get_proxy.Body has %d bytes (so far)\n", (int) body.size());
+			printf("%s\n", bin2hex(body.data(), (unsigned int)body.size()));
       }
 		int contLen = headers.get_content_length();
       if (optVerbose) {
-			fprintf(stderr, "ContentLength: %d\n", contLen);
+			printf("ContentLength: %d\n", contLen);
 		}
 
 		// Send header lines to client
@@ -303,7 +235,7 @@ void ProxyClient::handle_get_proxy(const std::string &file, const ProxyRule &rul
 
 		while (contLen) {
 			unsigned char buf[1000];
-			int len = read(host_fd, buf, sizeof(buf)-1);
+			int len = conn->recv(buf, sizeof(buf)-1);
 			if (len == 0) {
 				if (optVerbose) {
 					printf("handle_get_proxy: eof?  len=%d\n", len);
@@ -318,7 +250,7 @@ void ProxyClient::handle_get_proxy(const std::string &file, const ProxyRule &rul
 			}
 			if (optVerbose > 1) {
 				printf("handle_get_proxy: Body: Len:%d\n", len);
-				// fprintf(stderr, "%s\n", bin2hex(buf, len));
+				// printf("%s\n", bin2hex(buf, len));
 			}
 			send(fd, buf, len);
 			contLen -= len;
@@ -328,22 +260,30 @@ void ProxyClient::handle_get_proxy(const std::string &file, const ProxyRule &rul
    }
 
    if (optVerbose) {
-      fprintf(stderr, "Closing socket %d\n", host_fd);
+      printf("Closing connection to %s\n", rule.dst_host.c_str());
    }
-   close(host_fd);
+   conn->close();
 }
 
 void ProxyClient::handle_get(const std::string &file)
 {
 	if (optVerbose) {
-		fprintf(stderr, "Handle get: %s\n", file.c_str());
+		printf("Handle get: %s\n", file.c_str());
 	}
 
 	// Check if this as an proxy alias
 	for (auto &r : rules) {
 		if (file.find(r.src_file) == 0) {
 			printf("Proxy rule match: %s --> %s:%d%s\n", r.src_file.c_str(), r.dst_host.c_str(), r.dst_port, r.dst_file.c_str());
-			handle_get_proxy(file, r);
+			ConnectionClient *conn = 0;
+			if (r.dst_https)
+				conn = new ConnectionClientTls;
+			else
+				conn = new ConnectionClientTcp;
+			
+			handle_get_proxy(conn, file, r);
+			delete conn;
+			conn = 0;
 			return;
 		}
 	}
@@ -352,7 +292,6 @@ void ProxyClient::handle_get(const std::string &file)
 
 	// Request HTML file of abritary length
 	cnt = sscanf(file.c_str(), "/%d.html", &size);
-	fprintf(stderr, "cnt %d   find %d\n", cnt, (int) file.find(".html"));
 	if (cnt == 1 && file.find(".html") != std::string::npos && size > 0) {
 		if (size < 100) size = 100;
 		if (size > 1000000) size = 1000000;

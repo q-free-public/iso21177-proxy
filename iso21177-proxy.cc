@@ -37,7 +37,7 @@ void usage(const char *argv0)
    printf("Usage: %s [-v] [-V] [-d device]\n", prog.c_str());
    printf("   -V                     print version\n");
    printf("   -h                     print this usage information\n");
-   printf("   -v                     verbose (can be repeated to get more debug output), output goes to stderr.\n");
+   printf("   -v                     verbose (can be repeated to get more debug output).\n");
    printf("   -p n                   Port number for HTTP (default is %d)\n", optProxyPlainPort);
    printf("   -l                     List proxy rules\n");
 }
@@ -46,14 +46,18 @@ void list_rules()
 {
 	printf("Proxy forwarding rules\n");
 	for (const auto &r : rules) {
-		printf("%-40s --> %s:%d%s\n", r.src_file.c_str(), r.dst_host.c_str(), r.dst_port, r.dst_file.c_str());
+		if (r.dst_https)
+			printf("   %-30s --> https://%s:%d%s\n", r.src_file.c_str(), r.dst_host.c_str(), r.dst_port, r.dst_file.c_str());
+		else
+			printf("   %-30s --> http://%s:%d%s\n", r.src_file.c_str(), r.dst_host.c_str(), r.dst_port, r.dst_file.c_str());
 	}
 }
 
 void create_rules()
 {
-	rules.push_back(ProxyRule("/vg", "www.vg.no", 80, "/"));
-	rules.push_back(ProxyRule("/its1-100", "its1.q-free.com", 8888, "/100.text"));
+	rules.push_back(ProxyRule("/vg",       false, "www.vg.no",           80, "/"));
+	rules.push_back(ProxyRule("/its1-100", false, "its1.q-free.com",   8888, "/100.text"));
+	rules.push_back(ProxyRule("/its1-s",   true,  "its1.q-free.com",    443, "/index.html"));
 }
 
 
@@ -112,21 +116,21 @@ void removeClient(int fd)
 {
    for (auto it=clientList.begin(); it!=clientList.end(); ++it) {
       if (it->fd == fd) {
-         // fprintf(stderr, "Mark client as completed\n");
+         // printf("Mark client as completed\n");
          it->completed = true;
          it->fd = -1;
          time(&it->closeTime);
          return;
       }
    }
-   fprintf(stderr, "client with fd=%d not found\n", fd);
+   printf("client with fd=%d not found\n", fd);
 }
 
 void cleanupClients()
 {
    for (auto it=clientList.begin(); it!=clientList.end(); ++it) {
       if (it->pThread && it->completed) {
-         // fprintf(stderr, "Remove client from list\n");
+         // printf("Remove client from list\n");
          it->pThread->join();
          delete it->pThread;
 			it->pThread = 0;
@@ -140,14 +144,14 @@ void proxyPlainAcceptProc(void *ublox)
 {
    int nFdSocket = socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP);
    if (nFdSocket == -1) {
-      send2log(LOG_ERR, "socket(TCP) failed: %s", strerror(errno));
+      printf("socket(TCP) failed: %s", strerror(errno));
       exit(11);
    }
 
    const int one = 1;
    int status = setsockopt(nFdSocket, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
    if (status == -1) {
-      send2log(LOG_ERR, "setsockopt(SO_REUSEADDR) failed: %s", strerror(errno));
+      printf("setsockopt(SO_REUSEADDR) failed: %s", strerror(errno));
       exit(12);
    }
 
@@ -158,13 +162,13 @@ void proxyPlainAcceptProc(void *ublox)
    addrLocal6.sin6_addr = in6addr_any;
    status = bind(nFdSocket, (struct sockaddr*) &addrLocal6, sizeof(addrLocal6));
    if (status == -1) {
-      send2log(LOG_ERR, "bind(TCP,port=%d) failed: %s", optProxyPlainPort, strerror(errno));
+      printf("bind(TCP,port=%d) failed: %s", optProxyPlainPort, strerror(errno));
       exit(12);
    }
 
    status = listen(nFdSocket, 5);
    if (status == -1) {
-      send2log(LOG_ERR, "listen failed: %s", strerror(errno));
+      printf("listen failed: %s", strerror(errno));
       exit(13);
    }
 
@@ -173,12 +177,12 @@ void proxyPlainAcceptProc(void *ublox)
       memset(&addrClient, 0, sizeof(addrClient));
       socklen_t addrClientLen = sizeof(addrClient);
 		if (optVerbose) {
-			fprintf(stderr, "Waiting for HTTP connection on fd=%d  ptr=%p\n", nFdSocket, ublox);
+			printf("Waiting for HTTP connection on fd=%d  ptr=%p\n", nFdSocket, ublox);
 		}
       int fdClient = accept(nFdSocket, (sockaddr*)&addrClient, &addrClientLen);
       if (fdClient >= 0) {
          if (optVerbose) {
-            fprintf(stderr, "Starting thread for new incoming HTTP connection fd=%d  ptr=%p\n", fdClient, ublox);
+            printf("Starting thread for new incoming HTTP connection fd=%d  ptr=%p\n", fdClient, ublox);
          }
          auto newCliPtr = addClient(fdClient, addrClient);
          std::thread *gpsdClientThread = new std::thread([newCliPtr] { newCliPtr->client_proc(); } );
@@ -192,7 +196,7 @@ void proxyPlainAcceptProc(void *ublox)
       cleanupClients();
    }
 
-   fprintf(stderr, "Exiting HTTP accept loop.\n");
+   printf("Exiting HTTP accept loop.\n");
 }
 
 const char *bin2hex(unsigned char *bin, unsigned int len)

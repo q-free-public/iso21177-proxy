@@ -216,6 +216,8 @@ static void init_openssl_library(void)
 	/* https://www.openssl.org/docs/ssl/SSL_library_init.html */
 	SSL_library_init();
 
+#if OPENSSL_VERSION_NUMBER > 0x20000000
+#else
 	/* https://www.openssl.org/docs/crypto/ERR_load_crypto_strings.html */
 	SSL_load_error_strings();
 
@@ -227,6 +229,7 @@ static void init_openssl_library(void)
 	/*  *IF* you need something from openssl.cfg, such as a         */
 	/*  dynamically configured ENGINE.                              */
 	OPENSSL_config(NULL);
+#endif
 }
 
 static void print_error_string(int lineno, unsigned long err, const char* const label)
@@ -375,7 +378,11 @@ static int verify_callback(int preverify, X509_STORE_CTX* x509_ctx)
 	// Serial number
 	ASN1_INTEGER *serial = X509_get_serialNumber(cert);
 	if (serial != 0) {
+#if OPENSSL_VERSION_NUMBER > 0x20000000
+		printf("Serial number (hex): %s\n", bin2hex(ASN1_STRING_get0_data(serial), (unsigned int)ASN1_STRING_length(serial)));
+#else
 		printf("Serial number (hex): %s\n", bin2hex(ASN1_STRING_data(serial), (unsigned int)ASN1_STRING_length(serial)));
+#endif
 		BIGNUM *bn = ASN1_INTEGER_to_BN(serial, NULL);
 		if (bn != 0) {
 			char *tmp = BN_bn2dec(bn);
@@ -388,7 +395,11 @@ static int verify_callback(int preverify, X509_STORE_CTX* x509_ctx)
 	}
 
 	// Signature Algorithm
+#if OPENSSL_VERSION_NUMBER > 0x20000000
+	int pkey_nid = X509_get_signature_nid(cert);
+#else
 	int pkey_nid = OBJ_obj2nid(cert->cert_info->key->algor->algorithm);
+#endif
 	if (pkey_nid != NID_undef) {
 		const char* sslbuf = OBJ_nid2ln(pkey_nid);
 		printf("Signature algorithm: %s\n", sslbuf);

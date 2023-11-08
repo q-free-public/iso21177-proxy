@@ -11,6 +11,7 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <openssl/ssl.h>
 
 #include <string>
 #include <vector>
@@ -22,7 +23,11 @@
 #include "utils.h"
 
 int optVerbose = 0;  // For compatibility with utils.cc
-int optProxyPlainPort = 8080;
+int optProxyPlainPort = 8888;
+int optProxyRfc8902Port = 8877;
+int optProxyIso21177Port = 8866;
+int optProxyIso21177Aid = 1;
+
 const char iso21177_proxy_vsn_string[] = "v0.1 " __DATE__ " " __TIME__;
 std::list<ProxyClient> clientList;
 std::list<ProxyRule>  rules;
@@ -37,7 +42,10 @@ void usage(const char *argv0)
    printf("   -V                     print version\n");
    printf("   -h                     print this usage information\n");
    printf("   -v                     verbose (can be repeated to get more debug output).\n");
-   printf("   -p n                   Port number for HTTP (default is %d)\n", optProxyPlainPort);
+   printf("   -p n                   Port number for plain-text HTTP (default is %d)\n", optProxyPlainPort);
+   printf("   -rfc n                 Port number for RFC 8902 HTTP (default is %d)\n", optProxyRfc8902Port);
+   printf("   -iso n                 Port number for ISO 21177 HTTP (default is %d)\n", optProxyRfc8902Port);
+   printf("   -aid n                 Expected AID from client when using ISO 21177 (default %d)\n", optProxyIso21177Aid);
    printf("   -l                     List proxy rules\n");
 }
 
@@ -77,6 +85,15 @@ void parseargs(int argc, char *argv[])
          exit(0);
       } else if (strcmp(argv[i], "-p") == 0  && i<argc-1) {
          optProxyPlainPort = atoi(argv[i+1]);
+         i++;
+      } else if (strcmp(argv[i], "-rfc") == 0  && i<argc-1) {
+         optProxyRfc8902Port = atoi(argv[i+1]);
+         i++;
+      } else if (strcmp(argv[i], "-iso") == 0  && i<argc-1) {
+         optProxyIso21177Port = atoi(argv[i+1]);
+         i++;
+      } else if (strcmp(argv[i], "-aid") == 0  && i<argc-1) {
+         optProxyIso21177Aid = atoi(argv[i+1]);
          i++;
       } else {
          printf("Illegal command line option '%s'\n", argv[i]);
@@ -139,8 +156,12 @@ void cleanupClients()
    }
 }
 
-void proxyPlainAcceptProc(void *ublox)
+void plain_http_thread_proc()
 {
+   if (optVerbose >= 1) {
+      printf("iso21177-proxy starting up - Plain HTTP on port %d\n", optProxyPlainPort);
+   }
+
    int nFdSocket = socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP);
    if (nFdSocket == -1) {
       printf("socket(TCP) failed: %s", strerror(errno));
@@ -176,19 +197,19 @@ void proxyPlainAcceptProc(void *ublox)
       memset(&addrClient, 0, sizeof(addrClient));
       socklen_t addrClientLen = sizeof(addrClient);
 		if (optVerbose) {
-			printf("Waiting for HTTP connection on fd=%d  ptr=%p\n", nFdSocket, ublox);
+			printf("Waiting for HTTP connection on fd=%d\n", nFdSocket);
 		}
       int fdClient = accept(nFdSocket, (sockaddr*)&addrClient, &addrClientLen);
       if (fdClient >= 0) {
          if (optVerbose) {
-            printf("Starting thread for new incoming HTTP connection fd=%d  ptr=%p\n", fdClient, ublox);
+            printf("Starting thread for new incoming HTTP connection fd=%d\n", fdClient);
          }
          auto newCliPtr = addClient(fdClient, addrClient);
          std::thread *gpsdClientThread = new std::thread([newCliPtr] { newCliPtr->client_proc(); } );
          newCliPtr->pThread = gpsdClientThread;
       } else {
          if (optVerbose) {
-            perror("proxyPlainAcceptProc: accept error");
+            perror("plain_http_thread_proc: accept error");
          }
          break;
       }
@@ -198,7 +219,7 @@ void proxyPlainAcceptProc(void *ublox)
    printf("Exiting HTTP accept loop.\n");
 }
 
-const char *bin2hex(unsigned char *bin, unsigned int len)
+const char *bin2hex(const unsigned char *bin, unsigned int len)
 {
 	static char buffer[1000];
 	buffer[0] = 0;
@@ -214,13 +235,15 @@ int main(int argc, char *argv[])
 	parseargs(argc, argv);
 
    if (optVerbose >= 1) {
-      printf("iso21177-proxy starting up\n");
+      printf("iso21177-proxy\n");
+      unsigned long xx = OPENSSL_VERSION_NUMBER; // MN NF FP PS: major minor fix patch status
+      printf("Using openssl 0x%08lx  %ld.%ld.%ldp%ld (%ld)\n", xx, (xx >> 28), (xx>>20)&0xff, (xx>>12)&0xff, (xx>>4)&0xff, (xx&0x0f));
    }
 
 #if 1
-	proxyPlainAcceptProc((void*)0);
+	plain_http_thread_proc();
 #else
-   std::thread gpsdAcceptThread(proxyPlainAcceptProc, (void*)0);
+   std::thread gpsdAcceptThread(plain_http_thread_proc);
 	// detach() let thread run until process is terminated without any resource cleanup by the application. The OS will handle everything.
 	gpsdAcceptThread.detach();
 #endif

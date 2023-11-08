@@ -4,6 +4,10 @@ INSTALL_SYSTEMD_DIR=${DESTDIR}/lib/systemd/system
 COPTS+=-Wall -std=c++14
 CXXOPTS+=-Wall -std=c++14
 
+## Q-Free special openssl with RFC8902 and ISO 21177
+CXXOPTS+=-I/home/olal/openssl/include
+LDFLAGS+=-L/home/olal/openssl -Wl,-rpath=/home/olal/openssl
+
 %.o: %.cc
 	$(CXX) $(CXXOPTS) -O -c $<
 

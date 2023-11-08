@@ -43,7 +43,7 @@ void print_cn_name(const char* label, X509_NAME* const name);
 void print_san_name(const char* label, X509* const cert);
 void print_error_string(int lineno, unsigned long err, const char* const label);
 const char* get_validation_errstr(long e);
-const char *bin2hex(unsigned char *bin, unsigned int len);
+const char *bin2hex(const unsigned char *bin, unsigned int len);
 const char *time2str(ASN1_TIME *t);
 
 /* Cipher suites, https://www.openssl.org/docs/apps/ciphers.html */
@@ -353,24 +353,27 @@ int main(int argc, char* argv[])
 
 void init_openssl_library(void)
 {
-    /* https://www.openssl.org/docs/ssl/SSL_library_init.html */
-    (void)SSL_library_init();
-    /* Cannot fail */
+	printf("init_openssl_library\n");
+   unsigned long xx = OPENSSL_VERSION_NUMBER; // MN NF FP PS: major minor fix patch status
+   printf("Using openssl 0x%08lx  %ld.%ld.%ldp%ld (%ld)\n", xx, (xx >> 28), (xx>>20)&0xff, (xx>>12)&0xff, (xx>>4)&0xff, (xx&0x0f));
 
-    /* https://www.openssl.org/docs/crypto/ERR_load_crypto_strings.html */
-    SSL_load_error_strings();
-    /* Cannot fail */
+	/* https://www.openssl.org/docs/ssl/SSL_library_init.html */
+	SSL_library_init();
 
-    /* SSL_load_error_strings loads both libssl and libcrypto strings */
-    ERR_load_crypto_strings();
-    /* Cannot fail */
+#if OPENSSL_VERSION_NUMBER > 0x20000000
+#else
+	/* https://www.openssl.org/docs/crypto/ERR_load_crypto_strings.html */
+	SSL_load_error_strings();
 
-    /* OpenSSL_config may or may not be called internally, based on */
-    /*  some #defines and internal gyrations. Explicitly call it    */
-    /*  *IF* you need something from openssl.cfg, such as a         */
-    /*  dynamically configured ENGINE.                              */
-    OPENSSL_config(NULL);
-    /* Cannot fail */
+	/* SSL_load_error_strings loads both libssl and libcrypto strings */
+	ERR_load_crypto_strings();
+
+	/* OpenSSL_config may or may not be called internally, based on */
+	/*  some #defines and internal gyrations. Explicitly call it    */
+	/*  *IF* you need something from openssl.cfg, such as a         */
+	/*  dynamically configured ENGINE.                              */
+	OPENSSL_config(NULL);
+#endif
 
     /* Include <openssl/opensslconf.h> to get this define     */
 #if 0 // defined (OPENSSL_THREADS)
@@ -502,7 +505,11 @@ int verify_callback(int preverify, X509_STORE_CTX* x509_ctx)
 	// Serial number
 	ASN1_INTEGER *serial = X509_get_serialNumber(cert);
 	if (serial != 0) {
+#if OPENSSL_VERSION_NUMBER > 0x20000000
+		printf("Serial number (hex): %s\n", bin2hex(ASN1_STRING_get0_data(serial), (unsigned int)ASN1_STRING_length(serial)));
+#else
 		printf("Serial number (hex): %s\n", bin2hex(ASN1_STRING_data(serial), (unsigned int)ASN1_STRING_length(serial)));
+#endif
 		BIGNUM *bn = ASN1_INTEGER_to_BN(serial, NULL);
 		if (bn != 0) {
 			char *tmp = BN_bn2dec(bn);
@@ -515,7 +522,11 @@ int verify_callback(int preverify, X509_STORE_CTX* x509_ctx)
 	}
 
 	// Signature Algorithm
+#if OPENSSL_VERSION_NUMBER > 0x20000000
+	int pkey_nid = X509_get_signature_nid(cert);
+#else
 	int pkey_nid = OBJ_obj2nid(cert->cert_info->key->algor->algorithm);
+#endif
 	if (pkey_nid != NID_undef) {
 		const char* sslbuf = OBJ_nid2ln(pkey_nid);
 		printf("Signature algorithm: %s\n", sslbuf);
@@ -562,7 +573,7 @@ void print_error_string(int lineno, unsigned long err, const char* const label)
 }
 
 
-const char *bin2hex(unsigned char *bin, unsigned int len)
+const char *bin2hex(const unsigned char *bin, unsigned int len)
 {
 	static char buffer[1000];
 	buffer[0] = 0;

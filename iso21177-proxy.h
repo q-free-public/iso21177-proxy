@@ -30,4 +30,4 @@ extern std::list<ProxyRule>  rules;
 extern int                   optVerbose;
 
 extern void        removeClient(int fd);
-extern const char *bin2hex(unsigned char *bin, unsigned int len);
+extern const char *bin2hex(const unsigned char *bin, unsigned int len);

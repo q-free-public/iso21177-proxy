@@ -40,12 +40,11 @@ class CtxWrapper
 {
 public:
 	CtxWrapper() : ctx(0) {};
-	CtxWrapper(SSL_CTX *c) : ctx(c) { printf("C'tor(1) SSL_CTX %p\n", c); };
+	CtxWrapper(SSL_CTX *c) : ctx(c) { };
 	CtxWrapper(const CtxWrapper &rhs) = delete;
-	~CtxWrapper() { printf("delete SSL_CTX %p\n", ctx); if (ctx) SSL_CTX_free(ctx); ctx = 0; };
-	CtxWrapper & operator=(CtxWrapper &&rhs) { printf("move(3) SSL_CTX %p\n", rhs.ctx); ctx = rhs.ctx; rhs.ctx = 0; return *this; };
+	~CtxWrapper() { if (ctx) SSL_CTX_free(ctx); ctx = 0; };
+	CtxWrapper & operator=(CtxWrapper &&rhs) { ctx = rhs.ctx; rhs.ctx = 0; return *this; };
 	operator SSL_CTX *() const { return ctx; }
-	SSL_CTX *get() const { return ctx; }
 private:
 	SSL_CTX *ctx;
 };
@@ -57,7 +56,7 @@ public:
 	BioWrapper(BIO *c) : bio(c) {};
 	BioWrapper(const BioWrapper &rhs) = delete;
 	~BioWrapper() { if (bio) BIO_free_all(bio); bio = 0; };
-	BioWrapper & operator=(BioWrapper &&rhs) { printf("move(3) BIO %p\n", rhs.bio); bio = rhs.bio; rhs.bio = 0; return *this; };
+	BioWrapper & operator=(BioWrapper &&rhs) { bio = rhs.bio; rhs.bio = 0; return *this; };
 	operator BIO *() const { return bio; }
 private:
 	BIO *bio;

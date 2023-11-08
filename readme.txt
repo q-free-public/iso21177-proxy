@@ -20,3 +20,20 @@ Sec-Fetch-User: ?1
 Sec-Fetch-Dest: document
 Accept-Encoding: gzip, deflate, br
 Accept-Language: nb-NO,nb;q=0.9,en-GB;q=0.8,en;q=0.7,no;q=0.6,nn;q=0.5,en-US;q=0.4,sv;q=0.3,da;q=0.2,de;q=0.1,it;q=0.1
+
+
+Q-Free openssl with RFC8902 and ISO 21177 support
+-------------------------------------------------
+
+$ ./Configure
+$ make
+$ make test
+
+Linking apps:
+$(CC) -g -I$(OPENSSL_DIR)/include -L$(OPENSSL_DIR) \
+and running:
+LD_LIBRARY_PATH=$(OPENSSL_DIR) ./tls_client
+
+Or use Makefile settings:
+CXXOPTS+=-I/home/olal/openssl/include
+LDFLAGS+=-L/home/olal/openssl -Wl,-rpath=/home/olal/openssl

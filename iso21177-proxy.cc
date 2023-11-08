@@ -21,7 +21,6 @@
 #include "proxy-client.h"
 #include "utils.h"
 
-
 int optVerbose = 0;  // For compatibility with utils.cc
 int optProxyPlainPort = 8080;
 const char iso21177_proxy_vsn_string[] = "v0.1 " __DATE__ " " __TIME__;

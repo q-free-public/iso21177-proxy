@@ -219,7 +219,7 @@ void ProxyClient::handle_get_proxy(ConnectionClient *conn, const std::string &fi
 				}
 			}
 			printf("handle_get_proxy.Body has %d bytes (so far)\n", (int) body.size());
-			printf("%s\n", bin2hex(body.data(), (unsigned int)body.size()));
+			//printf("%s\n", bin2hex(body.data(), (unsigned int)body.size()));
       }
 		int contLen = headers.get_content_length();
       if (optVerbose) {
@@ -235,7 +235,7 @@ void ProxyClient::handle_get_proxy(ConnectionClient *conn, const std::string &fi
 
 		while (contLen) {
 			unsigned char buf[1000];
-			int len = conn->recv(buf, sizeof(buf)-1);
+			int len = conn->recv(buf, sizeof(buf));
 			if (len == 0) {
 				if (optVerbose) {
 					printf("handle_get_proxy: eof?  len=%d\n", len);

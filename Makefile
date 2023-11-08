@@ -19,7 +19,7 @@ openssl-test.o: openssl-test.cc
 	$(CXX) $(CXXOPTS) -O -c $<
 
 iso21177-proxy: iso21177-proxy.o utils.o proxy-client.o connection-client-tcp.o connection-client-tls.o
-	$(CXX) $^ $(LDFLAGS) -lpthread -o iso21177-proxy
+	$(CXX) $^ $(LDFLAGS) -lpthread -lssl -lcrypto -o iso21177-proxy
 
 openssl-test: openssl-test.o
 	$(CXX) $^ $(LDFLAGS) -lssl -lcrypto -o openssl-test

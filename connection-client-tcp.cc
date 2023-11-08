@@ -110,7 +110,7 @@ bool ConnectionClientTcp::send(const void *data_p, unsigned int len)
 	while (pos < len) {
 		int ret = ::write(sd, data + pos, len);
 		if (optVerbose) {
-			printf("Sending %u bytes on fd=%d  -->  sent %d\n", len, sd, ret);
+			printf("Sending %u bytes on sd=%d  -->  sent %d  Err:%d %s\n", len, sd, ret, errno, strerror(errno));
 		}
 		if (ret <= 0) {
 			return false;
@@ -124,7 +124,12 @@ bool ConnectionClientTcp::send(const void *data_p, unsigned int len)
 
 int ConnectionClientTcp::recv(unsigned char *data, unsigned int maxlen)
 {
-	return ::read(sd, data, maxlen);
+	int len = ::read(sd, data, maxlen);
+	if (optVerbose) {
+		printf("Recv %d bytes on sd=%d  -->  Err:%d %s\n", len, sd, errno, strerror(errno));
+	}
+	
+	return len;
 }
 
 void ConnectionClientTcp::close()

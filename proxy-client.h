@@ -22,6 +22,7 @@ public:
    std::thread *pThread;
    
    // Client variables
+	int          serial;
    int          fd;
    struct sockaddr_in6 addrClient;
    std::string  addrClientStr;

@@ -74,7 +74,7 @@ void ProxyClient::send(int sd, const void *data_p, unsigned int len)
 	while (pos < len) {
 		int ret = write(sd, data + pos, len);
 		if (optVerbose) {
-			printf("Sending %u bytes on fd=%d  -->  sent %d\n", len, sd, ret);
+			printf("Sending %u bytes on fd=%d  -->  sent %d  Err:%d %s\n", len, sd, ret, errno, strerror(errno));
 		}
 		if (ret <= 0) {
 			return;

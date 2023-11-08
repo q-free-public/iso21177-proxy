@@ -17,7 +17,6 @@
 #include "iso21177-proxy.h"
 #include "connection-client.h"
 
-static void init_openssl_library(void);
 static void print_cn_name(const char* label, X509_NAME* const name);
 static void print_san_name(const char* label, X509* const cert);
 static void print_error_string(int lineno, unsigned long err, const char* const label);
@@ -54,7 +53,6 @@ bool ConnectionClientTls::connect(const std::string &host, int port)
 		return false;
 
 	int res = 0;
-	init_openssl_library();
 
 	// Create SSL Context
    const SSL_METHOD* method = SSLv23_method();
@@ -203,33 +201,6 @@ int ConnectionClientTls::recv(unsigned char *data, unsigned int maxlen)
 void ConnectionClientTls::close()
 {
 	// Destructor will handle everything.
-}
-
-static void init_openssl_library(void)
-{
-	static bool done = false;
-	if (done) return;
-	done = true;
-
-	printf("init_openssl_library\n");
-
-	/* https://www.openssl.org/docs/ssl/SSL_library_init.html */
-	SSL_library_init();
-
-#if OPENSSL_VERSION_NUMBER > 0x20000000
-#else
-	/* https://www.openssl.org/docs/crypto/ERR_load_crypto_strings.html */
-	SSL_load_error_strings();
-
-	/* SSL_load_error_strings loads both libssl and libcrypto strings */
-	ERR_load_crypto_strings();
-
-	/* OpenSSL_config may or may not be called internally, based on */
-	/*  some #defines and internal gyrations. Explicitly call it    */
-	/*  *IF* you need something from openssl.cfg, such as a         */
-	/*  dynamically configured ENGINE.                              */
-	OPENSSL_config(NULL);
-#endif
 }
 
 static void print_error_string(int lineno, unsigned long err, const char* const label)

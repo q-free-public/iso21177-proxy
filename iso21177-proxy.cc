@@ -6,6 +6,8 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -105,7 +107,9 @@ void parseargs(int argc, char *argv[])
 
 ProxyClient *addClient(int fd, const struct sockaddr_in6 &addrClient)
 {
+	static int serial = 0;
    ProxyClient client;
+	client.serial = serial++;
    client.pThread = 0;
    client.fd = fd;
    client.addrClient = addrClient;
@@ -132,7 +136,7 @@ void removeClient(int fd)
 {
    for (auto it=clientList.begin(); it!=clientList.end(); ++it) {
       if (it->fd == fd) {
-         // printf("Mark client as completed\n");
+         printf("removeClient: Mark client with fd=%d serial=%d as completed\n", fd, it->serial);
          it->completed = true;
          it->fd = -1;
          time(&it->closeTime);
@@ -146,7 +150,7 @@ void cleanupClients()
 {
    for (auto it=clientList.begin(); it!=clientList.end(); ++it) {
       if (it->pThread && it->completed) {
-         // printf("Remove client from list\n");
+         printf("cleanupClients: Remove client from list serial=%d fd=%d\n", it->serial, it->fd);
          it->pThread->join();
          delete it->pThread;
 			it->pThread = 0;
@@ -202,7 +206,7 @@ void plain_http_thread_proc()
       int fdClient = accept(nFdSocket, (sockaddr*)&addrClient, &addrClientLen);
       if (fdClient >= 0) {
          if (optVerbose) {
-            printf("Starting thread for new incoming HTTP connection fd=%d\n", fdClient);
+            printf("Starting thread for new incoming HTTP connection fd=%d  rem-port=%d\n", fdClient, ntohs(addrClient.sin6_port));
          }
          auto newCliPtr = addClient(fdClient, addrClient);
          std::thread *gpsdClientThread = new std::thread([newCliPtr] { newCliPtr->client_proc(); } );
@@ -229,6 +233,29 @@ const char *bin2hex(const unsigned char *bin, unsigned int len)
 	return buffer;
 }
 
+void init_openssl_library(void)
+{
+	printf("init_openssl_library\n");
+
+	/* https://www.openssl.org/docs/ssl/SSL_library_init.html */
+	SSL_library_init();
+
+#if OPENSSL_VERSION_NUMBER > 0x20000000
+#else
+	/* https://www.openssl.org/docs/crypto/ERR_load_crypto_strings.html */
+	SSL_load_error_strings();
+
+	/* SSL_load_error_strings loads both libssl and libcrypto strings */
+	ERR_load_crypto_strings();
+
+	/* OpenSSL_config may or may not be called internally, based on */
+	/*  some #defines and internal gyrations. Explicitly call it    */
+	/*  *IF* you need something from openssl.cfg, such as a         */
+	/*  dynamically configured ENGINE.                              */
+	OPENSSL_config(NULL);
+#endif
+}
+
 int main(int argc, char *argv[])
 {
 	create_rules();
@@ -239,6 +266,9 @@ int main(int argc, char *argv[])
       unsigned long xx = OPENSSL_VERSION_NUMBER; // MN NF FP PS: major minor fix patch status
       printf("Using openssl 0x%08lx  %ld.%ld.%ldp%ld (%ld)\n", xx, (xx >> 28), (xx>>20)&0xff, (xx>>12)&0xff, (xx>>4)&0xff, (xx&0x0f));
    }
+
+   signal(SIGPIPE, SIG_IGN);
+	init_openssl_library();
 
 #if 1
 	plain_http_thread_proc();

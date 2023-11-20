@@ -4,9 +4,6 @@
 
 #include <string>
 
-#include <openssl/ssl.h>
-#include <openssl/bio.h>
-
 class ConnectionClient
 {
 public:
@@ -34,33 +31,6 @@ private:
 	int sd;
 };
 
-
-
-class CtxWrapper
-{
-public:
-	CtxWrapper() : ctx(0) {};
-	CtxWrapper(SSL_CTX *c) : ctx(c) { };
-	CtxWrapper(const CtxWrapper &rhs) = delete;
-	~CtxWrapper() { if (ctx) SSL_CTX_free(ctx); ctx = 0; };
-	CtxWrapper & operator=(CtxWrapper &&rhs) { ctx = rhs.ctx; rhs.ctx = 0; return *this; };
-	operator SSL_CTX *() const { return ctx; }
-private:
-	SSL_CTX *ctx;
-};
-
-class BioWrapper
-{
-public:
-	BioWrapper() : bio(0) {};
-	BioWrapper(BIO *c) : bio(c) {};
-	BioWrapper(const BioWrapper &rhs) = delete;
-	~BioWrapper() { if (bio) BIO_free_all(bio); bio = 0; };
-	BioWrapper & operator=(BioWrapper &&rhs) { bio = rhs.bio; rhs.bio = 0; return *this; };
-	operator BIO *() const { return bio; }
-private:
-	BIO *bio;
-};
 
 
 class ConnectionClientTls : public ConnectionClient

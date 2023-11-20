@@ -7,6 +7,39 @@
 #include <string>
 #include <list>
 
+#include <openssl/ssl.h>
+#include <openssl/bio.h>
+#include <openssl/err.h>
+
+#define CERT_HASH_LEN 8
+
+class CtxWrapper
+{
+public:
+	CtxWrapper() : ctx(0) {};
+	CtxWrapper(SSL_CTX *c) : ctx(c) { };
+	CtxWrapper(const CtxWrapper &rhs) = delete;
+	~CtxWrapper() { if (ctx) SSL_CTX_free(ctx); ctx = 0; };
+	CtxWrapper & operator=(CtxWrapper &&rhs) { ctx = rhs.ctx; rhs.ctx = 0; return *this; };
+	operator SSL_CTX *() const { return ctx; }
+private:
+	SSL_CTX *ctx;
+};
+
+class BioWrapper
+{
+public:
+	BioWrapper() : bio(0) {};
+	BioWrapper(BIO *c) : bio(c) {};
+	BioWrapper(const BioWrapper &rhs) = delete;
+	~BioWrapper() { if (bio) BIO_free_all(bio); bio = 0; };
+	BioWrapper & operator=(BioWrapper &&rhs) { bio = rhs.bio; rhs.bio = 0; return *this; };
+	operator BIO *() const { return bio; }
+private:
+	BIO *bio;
+};
+
+
 class ProxyRule
 {
 public:
@@ -26,8 +59,18 @@ public:
 };
 
 
-extern std::list<ProxyRule>  rules;
-extern int                   optVerbose;
+// Command line options
+extern int           optVerbose;
+extern const char   *optSecurityEntityAddress;
+extern int           optSecurityEntityPort;
+extern uint64_t      optProxyIso21177Aid;
+extern bool          optUseCurrentAtCert;
+extern bool          optForceX509;
+extern unsigned char opt1609EcOrAtCertHash[CERT_HASH_LEN];
 
+// Other global variables
+extern std::list<ProxyRule>  rules;
+
+// Global functions
 extern void        removeClient(int fd);
 extern const char *bin2hex(const unsigned char *bin, unsigned int len);

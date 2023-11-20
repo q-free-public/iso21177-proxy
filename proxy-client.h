@@ -15,6 +15,7 @@
 #include "iso21177-proxy.h"
 
 class ConnectionClient;
+class CtxWrapper;
 
 class ProxyClient
 {
@@ -35,16 +36,19 @@ public:
    long         sendBytes;
 
 	void client_proc();
+	void rfc8902_proc(SSL_CTX *ssl_ctx);
 
 protected:
-	void send(const std::string &hdr, const unsigned char *body, unsigned int body_len);
-	void send(const std::string &hdr, const std::string &body);
 	void send(int sd, const void *data, unsigned int len);
-	void emit_error(int code, const std::string &text);
-	void handle_get_html(int size);
-	void handle_get_text(int size);
-	void handle_get_bin(int size);
-	void handle_get_proxy(ConnectionClient *conn, const std::string &file, const ProxyRule &rule);
-	void handle_get(const std::string &file);
+	void send(SSL *ssl, const void *data, unsigned int len);
+
+	template<typename T> void send(T handle, const std::string &hdr, const unsigned char *body, unsigned int body_len);
+	template<typename T> void send(T handle, const std::string &hdr, const std::string &body);
+	template<typename T> void emit_error(T handle, int code, const std::string &text);
+	template<typename T> void handle_get_html(T handle, int size);
+	template<typename T> void handle_get_text(T handle, int size);
+	template<typename T> void handle_get_bin(T handle, int size);
+	template<typename T> void handle_get_proxy(T handle, ConnectionClient *conn, const std::string &file, const ProxyRule &rule);
+	template<typename T> void handle_get(T handle, const std::string &file);
 };
 

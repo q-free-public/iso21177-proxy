@@ -19,3 +19,7 @@ utils.h
 # Executables
 iso21177-proxy
 openssl-test
+tls_client
+
+# log file
+keylog_client.txt

@@ -37,3 +37,14 @@ LD_LIBRARY_PATH=$(OPENSSL_DIR) ./tls_client
 Or use Makefile settings:
 CXXOPTS+=-I/home/olal/openssl/include
 LDFLAGS+=-L/home/olal/openssl -Wl,-rpath=/home/olal/openssl
+
+
+
+Run proxy:
+----------
+iso21177-proxy -se-host 192.168.21.247 -vv -aid 36
+
+Run RFC8902 HTTP client test tool:
+----------------------------------
+tls_client -e 192.168.21.247 -c -p 8877 -d -n 36 -H
+

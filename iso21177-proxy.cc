@@ -24,16 +24,28 @@
 #include "proxy-client.h"
 #include "utils.h"
 
-int optVerbose = 0;  // For compatibility with utils.cc
-int optProxyPlainPort = 8888;
-int optProxyRfc8902Port = 8877;
-int optProxyIso21177Port = 8866;
-int optProxyIso21177Aid = 1;
+int				optVerbose = 0;  // For compatibility with utils.cc
+int				optProxyPlainPort = 8888;
+int				optProxyRfc8902Port = 8877;
+int				optProxyIso21177Port = 8866;
 
-const char iso21177_proxy_vsn_string[] = "v0.1 " __DATE__ " " __TIME__;
+const char    *optSecurityEntityAddress = "127.0.0.1";
+int 				optSecurityEntityPort = 3999;
+uint64_t			optProxyIso21177Aid = 623;
+bool				optUseCurrentAtCert = true;
+bool				optForceX509 = false;
+bool           opt1609EcOrAtCertHashOk = false;
+unsigned char  opt1609EcOrAtCertHash[CERT_HASH_LEN];
+const char    *optCaCertPath = "ca.cert.pem";
+
+const char iso21177_proxy_vsn_string[] = "v0.2 " __DATE__ " " __TIME__;
 std::list<ProxyClient> clientList;
 std::list<ProxyRule>  rules;
+std::thread httpPlainThread;
+std::thread httpRfc8902Thread;
 
+
+void handle_usr1(int signo, siginfo_t *info, void *extra);
 
 void usage(const char *argv0)
 {
@@ -47,7 +59,12 @@ void usage(const char *argv0)
    printf("   -p n                   Port number for plain-text HTTP (default is %d)\n", optProxyPlainPort);
    printf("   -rfc n                 Port number for RFC 8902 HTTP (default is %d)\n", optProxyRfc8902Port);
    printf("   -iso n                 Port number for ISO 21177 HTTP (default is %d)\n", optProxyRfc8902Port);
-   printf("   -aid n                 Expected AID from client when using ISO 21177 (default %d)\n", optProxyIso21177Aid);
+	printf("   -se-host n             Security entity host name (default is %s)\n", optSecurityEntityAddress);
+	printf("   -se-port n             Security entity port number (default is %d)\n", optSecurityEntityPort);
+   printf("   -aid n                 Expected AID from client when using ISO 21177 (default %ld)\n", (long)optProxyIso21177Aid);
+   printf("   -at                    Use current AT certificate\n");
+   printf("   -x509                  Use X.509 certificate\n");
+   printf("   -cert aabbccddeeff     Use 1609 certificate given by this hash. 8 bytes / 16 hex digits\n");
    printf("   -l                     List proxy rules\n");
 }
 
@@ -95,8 +112,42 @@ void parseargs(int argc, char *argv[])
          optProxyIso21177Port = atoi(argv[i+1]);
          i++;
       } else if (strcmp(argv[i], "-aid") == 0  && i<argc-1) {
-         optProxyIso21177Aid = atoi(argv[i+1]);
+			optProxyIso21177Aid = atol(argv[i+1]);
+			if (optProxyIso21177Aid == 0) {
+				printf("AID error\n");
+				usage(argv[0]);
+				exit(1);
+			}
          i++;
+      } else if (strcmp(argv[i], "-se-port") == 0  && i<argc-1) {
+         optSecurityEntityPort = atoi(argv[i+1]);
+         i++;
+      } else if (strcmp(argv[i], "-se-host") == 0  && i<argc-1) {
+         optSecurityEntityAddress = argv[i+1];
+         i++;
+      } else if (strcmp(argv[i], "-cert") == 0  && i<argc-1) {
+			if (2*CERT_HASH_LEN != strlen(argv[i+1])) {
+				printf("Wrong length hex string %s - expected %d\n", argv[i+1], 2*CERT_HASH_LEN);
+				usage(argv[0]);
+				exit(1);
+			}
+			for (int j = 0; j < CERT_HASH_LEN; j++) {
+				int hex;
+				int rc = sscanf(argv[i+1] + j*2, "%2x", &hex);
+				if (rc < 1) {
+					printf("Failed to parse hex string for certificate hash: %s\n", argv[i+1]);
+					exit(EXIT_FAILURE);
+				}
+				opt1609EcOrAtCertHash[j] = hex;
+			}
+			opt1609EcOrAtCertHashOk = true;
+			optUseCurrentAtCert = false;
+			i++;
+      } else if (strcmp(argv[i], "-at") == 0) {
+			optUseCurrentAtCert = true;
+			opt1609EcOrAtCertHashOk = false;
+      } else if (strcmp(argv[i], "-x509") == 0) {
+			optForceX509 = true;
       } else {
          printf("Illegal command line option '%s'\n", argv[i]);
          usage(argv[0]);
@@ -160,40 +211,85 @@ void cleanupClients()
    }
 }
 
-void plain_http_thread_proc()
+int create_server_socket(int port)
 {
-   if (optVerbose >= 1) {
-      printf("iso21177-proxy starting up - Plain HTTP on port %d\n", optProxyPlainPort);
-   }
-
    int nFdSocket = socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP);
    if (nFdSocket == -1) {
       printf("socket(TCP) failed: %s", strerror(errno));
-      exit(11);
+      return -1;
    }
 
    const int one = 1;
    int status = setsockopt(nFdSocket, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
    if (status == -1) {
       printf("setsockopt(SO_REUSEADDR) failed: %s", strerror(errno));
-      exit(12);
+		close(nFdSocket);
+      return -1;
    }
 
    struct sockaddr_in6 addrLocal6;
    memset(&addrLocal6, 0, sizeof(addrLocal6));
    addrLocal6.sin6_family = AF_INET6;
-   addrLocal6.sin6_port = htons(optProxyPlainPort);
+   addrLocal6.sin6_port = htons(port);
    addrLocal6.sin6_addr = in6addr_any;
    status = bind(nFdSocket, (struct sockaddr*) &addrLocal6, sizeof(addrLocal6));
    if (status == -1) {
-      printf("bind(TCP,port=%d) failed: %s", optProxyPlainPort, strerror(errno));
-      exit(12);
+      printf("bind(TCP,port=%d) failed: %s", port, strerror(errno));
+		close(nFdSocket);
+      return -1;
    }
 
    status = listen(nFdSocket, 5);
    if (status == -1) {
       printf("listen failed: %s", strerror(errno));
-      exit(13);
+		close(nFdSocket);
+      return -1;
+   }
+	
+	return nFdSocket;
+}
+
+void keylog_srv_cb_func(const SSL *ssl, const char *line) {
+	printf("keylog_srv_cb_func: %s\n", line);
+}
+
+bool create_context(CtxWrapper &ret)
+{
+	ret = (SSL_CTX_new(TLS_server_method()));
+	if (ret == 0) {
+		fprintf(stderr, "SSL_CTX_new failed\n");
+		return false;
+	}
+	SSL_CTX_set_keylog_callback(ret, keylog_srv_cb_func);
+	if (!SSL_CTX_set_min_proto_version(ret, TLS1_3_VERSION)) {
+		fprintf(stderr, "SSL_CTX_set_min_proto_version failed: ");
+		ERR_print_errors_fp(stderr);
+		return false;
+	}
+	if (1 != SSL_CTX_load_verify_locations(ret, optCaCertPath, NULL)) {
+		fprintf(stderr, "SSL_CTX_load_verify_locations failed: %s\n", optCaCertPath);
+		ERR_print_errors_fp(stderr);
+		return false;
+	}
+
+	return true;
+}
+
+void plain_http_thread_proc()
+{
+   if (optVerbose >= 1) {
+      printf("iso21177-proxy starting up - Plain HTTP on port %d\n", optProxyPlainPort);
+   }
+
+	struct sigaction action;
+   action.sa_flags = SA_SIGINFO; 
+   action.sa_sigaction = handle_usr1;
+   sigaction(SIGUSR1, &action, NULL); 
+
+	int nFdSocket = create_server_socket(optProxyPlainPort);
+   if (nFdSocket == -1) {
+      printf("socket(TCP) failed for port %d: %s", optProxyPlainPort, strerror(errno));
+      exit(11);
    }
 
    while (true) {
@@ -201,7 +297,7 @@ void plain_http_thread_proc()
       memset(&addrClient, 0, sizeof(addrClient));
       socklen_t addrClientLen = sizeof(addrClient);
 		if (optVerbose) {
-			printf("Waiting for HTTP connection on fd=%d\n", nFdSocket);
+			printf("Waiting for plain HTTP connection on fd=%d\n", nFdSocket);
 		}
       int fdClient = accept(nFdSocket, (sockaddr*)&addrClient, &addrClientLen);
       if (fdClient >= 0) {
@@ -221,6 +317,55 @@ void plain_http_thread_proc()
    }
 
    printf("Exiting HTTP accept loop.\n");
+}
+
+void rfc8902_http_thread_proc()
+{
+   if (optVerbose >= 1) {
+      printf("iso21177-proxy starting up - RFC8902 HTTP on port %d\n", optProxyRfc8902Port);
+   }
+	
+	struct sigaction action;
+   action.sa_flags = SA_SIGINFO; 
+   action.sa_sigaction = handle_usr1;
+   sigaction(SIGUSR1, &action, NULL);
+
+	CtxWrapper ssl_ctx;
+	if (!create_context(ssl_ctx)) {
+		fprintf(stderr, "create_context failed\n");
+		exit(10);
+	}
+	
+	int nFdSocket = create_server_socket(optProxyRfc8902Port);
+   if (nFdSocket == -1) {
+      printf("socket(TCP) failed for port %d: %s", optProxyRfc8902Port, strerror(errno));
+      exit(11);
+   }
+	
+   while (true) {
+      struct sockaddr_in6 addrClient;
+      memset(&addrClient, 0, sizeof(addrClient));
+      socklen_t addrClientLen = sizeof(addrClient);
+		if (optVerbose) {
+			printf("Waiting for RFC8902 HTTP connection on fd=%d\n", nFdSocket);
+		}
+      int fdClient = accept(nFdSocket, (sockaddr*)&addrClient, &addrClientLen);
+      if (fdClient >= 0) {
+         if (optVerbose) {
+            printf("Starting thread for new incoming HTTP connection fd=%d  rem-port=%d\n", fdClient, ntohs(addrClient.sin6_port));
+         }
+         auto newCliPtr = addClient(fdClient, addrClient);
+			SSL_CTX *ctx = ssl_ctx; // ‘ctx’ is not captured
+         std::thread *gpsdClientThread = new std::thread([ctx, newCliPtr] { newCliPtr->rfc8902_proc(ctx); } );
+         newCliPtr->pThread = gpsdClientThread;
+      } else {
+         if (optVerbose) {
+            perror("rfc8902_http_thread_proc: accept error");
+         }
+         break;
+      }
+      cleanupClients();
+   }
 }
 
 const char *bin2hex(const unsigned char *bin, unsigned int len)
@@ -256,6 +401,18 @@ void init_openssl_library(void)
 #endif
 }
 
+void handle_usr1(int signo, siginfo_t *info, void *extra) 
+{
+	printf("handle_usr1: signo %d in accept thread\n", signo);
+}
+
+void handle_sigint(int intr)
+{
+	printf("Handle SIGINT in main thread\n");
+	pthread_kill(httpPlainThread.native_handle(), SIGUSR1);
+	pthread_kill(httpRfc8902Thread.native_handle(), SIGUSR1);
+}
+
 int main(int argc, char *argv[])
 {
 	create_rules();
@@ -264,19 +421,30 @@ int main(int argc, char *argv[])
    if (optVerbose >= 1) {
       printf("iso21177-proxy\n");
       unsigned long xx = OPENSSL_VERSION_NUMBER; // MN NF FP PS: major minor fix patch status
-      printf("Using openssl 0x%08lx  %ld.%ld.%ldp%ld (%ld)\n", xx, (xx >> 28), (xx>>20)&0xff, (xx>>12)&0xff, (xx>>4)&0xff, (xx&0x0f));
+      printf("openssl verion:                  %ld.%ld.%ldp%ld (%ld)\n", (xx >> 28), (xx>>20)&0xff, (xx>>12)&0xff, (xx>>4)&0xff, (xx&0x0f));
+		printf("Port number for plain HTTP:      %d\n", optProxyPlainPort);
+		printf("Port number for RFC8902 HTTP:    %d\n", optProxyRfc8902Port);
+		printf("Port number for ISO 21177 HTTP:  %d\n", optProxyIso21177Port);
+		printf("Security entity address:         %s  port %d\n", optSecurityEntityAddress, optSecurityEntityPort);
+		printf("AID (PSID):                      %ld\n", (long) optProxyIso21177Aid);
+		printf("Use default AT certificate:      %s\n", optUseCurrentAtCert ? "yes" : "no");
+		printf("Use X.509 certificate:           %s\n", optForceX509 ? "yes" : "no");
+		printf("Use specific AT/EC certificate:  %s\n", opt1609EcOrAtCertHashOk ? bin2hex(opt1609EcOrAtCertHash, CERT_HASH_LEN) : "Use default AT certificate");
+		printf("CA certificate path:             %s\n", optCaCertPath);
    }
 
    signal(SIGPIPE, SIG_IGN);
+	signal(SIGINT, handle_sigint);
+
 	init_openssl_library();
 
-#if 1
-	plain_http_thread_proc();
-#else
-   std::thread gpsdAcceptThread(plain_http_thread_proc);
-	// detach() let thread run until process is terminated without any resource cleanup by the application. The OS will handle everything.
-	gpsdAcceptThread.detach();
-#endif
+   httpPlainThread = std::thread(plain_http_thread_proc);
+   httpRfc8902Thread = std::thread(rfc8902_http_thread_proc);
 
+	printf("Waiting for join\n");
+	httpPlainThread.join();
+	httpRfc8902Thread.join();
+	printf("join completed\n");
+	
 	return 0;
 }

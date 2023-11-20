@@ -51,9 +51,9 @@ void ProxyClient::client_proc()
       }
 
 	   if (headers.get_verb() == "GET") {
-		   handle_get(headers.get_file());
+		   handle_get(fd, headers.get_file());
 	   } else {
-		   emit_error(500, "Illegal verb: " + headers.get_verb());
+		   emit_error(fd, 500, "Illegal verb: " + headers.get_verb());
 	   }
    } catch (const char *msg) {
       printf("Catched exception: %s\n", msg);
@@ -84,22 +84,50 @@ void ProxyClient::send(int sd, const void *data_p, unsigned int len)
 	}
 }
 
-void ProxyClient::send(const std::string &hdr, const unsigned char *body, unsigned int body_len)
+void ProxyClient::send(SSL *ssl, const void *data_p, unsigned int len)
+{
+	const char *data = (const char*) data_p;
+	unsigned int pos = 0;
+	while (pos < len) {
+		int ret = SSL_write(ssl, data + pos, len);
+		if (optVerbose) {
+			printf("Sending %u bytes on ssl=%p  -->  sent %d  Err:%d %s\n", len, ssl, ret, errno, strerror(errno));
+		}
+		if (ret <= 0) {
+			if (optVerbose) {
+				int ssl_err = SSL_get_error(ssl, len);
+				if (ssl_err != SSL_ERROR_WANT_READ && ssl_err != SSL_ERROR_WANT_WRITE) {
+					fprintf(stderr, "SSL_write failed: ssl_error=%d: ", ssl_err);
+					ERR_print_errors_fp(stderr);
+					fprintf(stderr, "\n");
+				}
+			}
+			return;
+		}
+		pos += ret;
+		len -= ret;
+	}
+}
+
+template<typename T>
+void ProxyClient::send(T handle, const std::string &hdr, const unsigned char *body, unsigned int body_len)
 {
 	if (optVerbose) {
 		printf("Sending Header: %s\nFollowed by %u bytes body.\n", hdr.c_str(), body_len);
 	}
 
-	send(fd, hdr.c_str(), hdr.size());
-	send(fd, body, body_len);
+	send(handle, hdr.c_str(), hdr.size());
+	send(handle, body, body_len);
 }
 
-void ProxyClient::send(const std::string &hdr, const std::string &body)
+template<typename T>
+void ProxyClient::send(T handle, const std::string &hdr, const std::string &body)
 {
-	send(hdr, (const unsigned char *)body.c_str(), body.size());
+	send(handle, hdr, (const unsigned char *)body.c_str(), body.size());
 }
 
-void ProxyClient::emit_error(int code, const std::string &text)
+template<typename T>
+void ProxyClient::emit_error(T handle, int code, const std::string &text)
 {
 	std::string body;
 	body += "<html>\r\n";
@@ -113,10 +141,11 @@ void ProxyClient::emit_error(int code, const std::string &text)
 	hdr += "Content-Type: text/html\r\n";
 	hdr += "Content-Length: " + std::to_string(body.size()) + "\r\n";
 	hdr += "\r\n";
-	send(hdr, body);
+	send(handle, hdr, body);
 }
 
-void ProxyClient::handle_get_html(int size)
+template<typename T>
+void ProxyClient::handle_get_html(T handle, int size)
 {
 	const std::string source = "Q-Free is a prime mover in the world of smart, safe, and sustainable transportation management. We go to work every day hoping to do two things: improve mobility and make the world a little better. Collectively, we channel our energy to influence and develop the global ITS community. We improve traffic flow, road safety, and air quality in communities all over the world. ";
 	std::string body;
@@ -133,10 +162,11 @@ void ProxyClient::handle_get_html(int size)
 	hdr += "Content-Type: text/html\r\n";
 	hdr += "Content-Length: " + std::to_string(body.size()) + "\r\n";
 	hdr += "\r\n";
-	send(hdr, body);
+	send(handle, hdr, body);
 }
 
-void ProxyClient::handle_get_text(int size)
+template<typename T>
+void ProxyClient::handle_get_text(T handle, int size)
 {
 	const std::string source = "Q-Free is a prime mover in the world of smart, safe, and sustainable transportation management.\r\n";
 	std::string body;
@@ -151,10 +181,11 @@ void ProxyClient::handle_get_text(int size)
 	hdr += "Content-Type: text/plain\r\n";
 	hdr += "Content-Length: " + std::to_string(body.size()) + "\r\n";
 	hdr += "\r\n";
-	send(hdr, body);
+	send(handle, hdr, body);
 }
 
-void ProxyClient::handle_get_bin(int size)
+template<typename T>
+void ProxyClient::handle_get_bin(T handle, int size)
 {
 	std::vector<unsigned char> body;
 	unsigned char ch = 0;
@@ -167,15 +198,16 @@ void ProxyClient::handle_get_bin(int size)
 	hdr += "Content-Type: application/octet-stream\r\n";
 	hdr += "Content-Length: " + std::to_string(body.size()) + "\r\n";
 	hdr += "\r\n";
-	send(hdr, body.data(), body.size());
+	send(handle, hdr, body.data(), body.size());
 }
 
-void ProxyClient::handle_get_proxy(ConnectionClient *conn, const std::string &file, const ProxyRule &rule)
+template<typename T>
+void ProxyClient::handle_get_proxy(T handle, ConnectionClient *conn, const std::string &file, const ProxyRule &rule)
 {
 	bool success = conn->connect(rule.dst_host, rule.dst_port);
 	if (!success) {
 		printf("Connection error to host %s\n", rule.dst_host.c_str());
-		emit_error(500, "Connection error to " + rule.dst_host);
+		emit_error(handle, 500, "Connection error to " + rule.dst_host);
 		return;
 	}
 
@@ -265,7 +297,8 @@ void ProxyClient::handle_get_proxy(ConnectionClient *conn, const std::string &fi
    conn->close();
 }
 
-void ProxyClient::handle_get(const std::string &file)
+template<typename T>
+void ProxyClient::handle_get(T handle, const std::string &file)
 {
 	if (optVerbose) {
 		printf("Handle get: %s\n", file.c_str());
@@ -281,7 +314,7 @@ void ProxyClient::handle_get(const std::string &file)
 			else
 				conn = new ConnectionClientTcp;
 			
-			handle_get_proxy(conn, file, r);
+			handle_get_proxy(handle, conn, file, r);
 			delete conn;
 			conn = 0;
 			return;
@@ -295,7 +328,7 @@ void ProxyClient::handle_get(const std::string &file)
 	if (cnt == 1 && file.find(".html") != std::string::npos && size > 0) {
 		if (size < 100) size = 100;
 		if (size > 1000000) size = 1000000;
-		handle_get_html(size);
+		handle_get_html(handle, size);
 		return;
 	}
 
@@ -304,7 +337,7 @@ void ProxyClient::handle_get(const std::string &file)
 	if (cnt == 1 && file.find(".text") != std::string::npos && size > 0) {
 		if (size < 100) size = 100;
 		if (size > 1000000) size = 1000000;
-		handle_get_text(size);
+		handle_get_text(handle, size);
 		return;
 	}
 
@@ -313,10 +346,230 @@ void ProxyClient::handle_get(const std::string &file)
 	if (cnt == 1 && file.find(".bin") != std::string::npos && size > 0) {
 		if (size < 100) size = 100;
 		if (size > 1000000) size = 1000000;
-		handle_get_bin(size);
+		handle_get_bin(handle, size);
 		return;
 	}
 
 	// No match: error
-	emit_error(400, "Illegal URL");
+	emit_error(handle, 400, "Illegal URL");
+}
+
+
+
+// -----------------------------------------------------------------------------
+// RFC8902
+// -----------------------------------------------------------------------------
+
+int ssl_print_1609_status(SSL *s)
+{
+	printf("Information about the other side of the connection:\n");
+	uint64_t remote_psid;
+	uint8_t *remote_ssp = NULL;
+	size_t remote_ssp_len;
+	unsigned char remote_cert_hash[CERT_HASH_LEN];
+
+	if (SSL_get_1609_psid_received(s, &remote_psid, &remote_ssp_len, &remote_ssp, remote_cert_hash) <= 0) {
+		ERR_print_errors_fp(stderr);
+		fprintf(stderr, "   SSL_get_1609_psid_received failed\n");
+		return 0;
+	}
+	long verify_result = 0;
+	if ((verify_result = SSL_get_verify_result(s)) != X509_V_OK) {
+		ERR_print_errors_fp(stderr);
+		fprintf(stderr, "   SSL_get_verify_result failed %ld\n", verify_result);
+		free(remote_ssp);
+		remote_ssp = 0;
+		return 0;
+	}
+
+	printf("   Peer verification:         %ld - %s\n", verify_result, verify_result == 0 ? "OK" : "FAIL");
+	printf("   PSID/AID used for TLS is:  %lu\n", (unsigned long)remote_psid);
+	printf("   SSP used for TLS are       %s\n", bin2hex(remote_ssp, remote_ssp_len));
+	printf("   Cert used for TLS is       %s\n", bin2hex(remote_cert_hash, CERT_HASH_LEN));
+
+	free(remote_ssp);
+	remote_ssp = 0;
+
+	if (remote_psid != optProxyIso21177Aid) {
+		printf("   Expected PSID/AID          %lu - aborting\n", (unsigned long) optProxyIso21177Aid);
+		return 0;
+	}
+	
+	return 1;
+}
+
+static int ssl_set_RFC8902_values(SSL *ssl, int server_support, int client_support)
+{
+	if (!SSL_enable_RFC8902_support(ssl, server_support, client_support, optUseCurrentAtCert)) {
+		fprintf(stderr, "SSL_enable_RFC8902_support failed\n");
+		ERR_print_errors_fp(stderr);
+		return 0;
+	}
+	if (optForceX509) {
+		if (1 != SSL_use_PrivateKey_file(ssl, "client.key.pem", SSL_FILETYPE_PEM)) {
+			fprintf(stderr, "SSL_CTX_use_PrivatKey_file failed: ");
+			ERR_print_errors_fp(stderr);
+			return 0;
+		}
+		if (1 != SSL_use_certificate_file(ssl, "client.cert.pem", SSL_FILETYPE_PEM)) {
+			fprintf(stderr, "SSL_CTX_use_certificate_file failed: ");
+			ERR_print_errors_fp(stderr);
+			return 0;
+		}
+	} else {
+		if (!optUseCurrentAtCert) {
+			if (!SSL_use_1609_cert_by_hash(ssl, opt1609EcOrAtCertHash)) {
+				fprintf(stderr, "SSL_use_1609_cert_by_hash failed\n");
+				ERR_print_errors_fp(stderr);
+				return 0;
+			}
+		}
+
+		if (optProxyIso21177Aid > 0) {
+			if (!SSL_use_1609_PSID(ssl, optProxyIso21177Aid)) {
+				fprintf(stderr, "SSL_use_1609_PSID = %d failed\n", (int)optProxyIso21177Aid);
+				ERR_print_errors_fp(stderr);
+				return 0;
+			}
+		}
+	}
+	return 1;
+}
+
+
+void ProxyClient::rfc8902_proc(SSL_CTX *ssl_ctx)
+{
+   if (optVerbose) {
+      printf("Starting proxyPlainClientProc fd=%d\n", fd);
+   }
+
+	SSL *ssl = SSL_new(ssl_ctx);
+	if (ssl == 0) {
+		fprintf(stderr, "SSL_new failed\n");
+		exit(30);
+	}
+
+	if (!SSL_set_1609_sec_ent_addr(ssl, optSecurityEntityPort, optSecurityEntityAddress)) {
+		fprintf(stderr, "SSL_set_1609_sec_ent_addr failed\n");
+		ERR_print_errors_fp(stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	int server_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
+	int client_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
+	if (optForceX509) {
+		server_support = SSL_RFC8902_X509;
+	}
+	if (!ssl_set_RFC8902_values(ssl, server_support, client_support)) {
+		exit(EXIT_FAILURE);
+	}
+
+	if (!SSL_set_fd(ssl, fd)) {
+		fprintf(stderr, "SSL_set_fd failed\n");
+		exit(EXIT_FAILURE);
+	}
+
+#if OPENSSL_VERSION_NUMBER >= 0x1010100fL
+	/* TLS 1.3 server sends session tickets after a handhake as part of
+	 * the SSL_accept(). If a client finishes all its job before server
+	 * sends the tickets, SSL_accept() fails with EPIPE errno. Since we
+	 * are not interested in a session resumption, we can not to send the
+	 * tickets. */
+	/*if (1 != SSL_set_num_tickets(ssl, 0)) {
+		fprintf(stderr, "SSL_set_num_tickets failed\n");
+		exit(EXIT_FAILURE);
+	}
+	Or we can perform two-way shutdown. Client must call SSL_read() before
+	the final SSL_shutdown(). */
+#endif
+
+	int retval = SSL_accept(ssl);
+	if (retval <= 0) {
+		fprintf(stderr, "SSL_accept failed ssl_err=%d errno=%s\n", SSL_get_error(ssl, retval), strerror(errno));
+		ERR_print_errors_fp(stderr);
+		return;
+	}
+	printf("SSL accepted.\n");
+
+	if (ssl_print_1609_status(ssl) == 0) {
+		// Certificates error
+		fprintf(stderr, "Insufficient right - aborting\n");
+	} else {
+		// Certificates OK
+
+		// Read request from HTTP client
+		HttpHeaders headers;
+		while (!headers.is_complete()) {
+			char buf[1000];
+			int len = SSL_read(ssl, buf, sizeof(buf)-1);
+			if (len == 0) {
+				if (optVerbose) {
+					printf("proxyRfc8902ClientProc: eof?  len=%d\n", len);
+				}
+				break;
+			} else if (len < 0) {
+				if (optVerbose) {
+					int ssl_error = SSL_get_error(ssl, len);
+					ERR_print_errors_fp(stderr);
+					if (ssl_error == SSL_ERROR_ZERO_RETURN) {
+						printf("Server thinks a client closed a TLS session\n");
+					} else if (ssl_error != SSL_ERROR_WANT_READ &&
+						ssl_error != SSL_ERROR_WANT_WRITE) {
+						fprintf(stderr, "server read failed: ssl_error=%d:\n", ssl_error);
+					}
+				}
+				break;
+			}
+			if (optVerbose > 1) {
+				printf("proxyRfc8902ClientProc: Len:%d  Header: %*.*s\n", len, len, len, buf);
+			}
+			recvBytes += len;
+			headers.add_data(buf, len);
+		}
+
+		// Send data to client:
+		// ssl_send_message(ssl, buffer, processed);
+
+		try {
+			if (optVerbose) {
+				printf("RFC8902 Header is complete\n");
+				if (optVerbose > 1) {
+					for (auto &line : headers.headerlines) {
+						printf("%s\n", line.c_str());
+					}
+				}
+				printf("Verb:  %s\n", headers.get_verb().c_str());
+				printf("Proto: %s\n", headers.get_protocol().c_str());
+				printf("File:  %s\n", headers.get_file().c_str());
+			}
+
+			if (headers.get_verb() == "GET") {
+				handle_get(ssl, headers.get_file());
+			} else {
+				emit_error(ssl, 500, "Illegal verb: " + headers.get_verb());
+			}
+		} catch (const char *msg) {
+			printf("Catched exception: %s\n", msg);
+		}
+	}
+
+   if (optVerbose) {
+      printf("Do SSL shutdown\n");
+   }
+	retval = SSL_shutdown(ssl);
+	if (retval < 0) {
+		int ssl_err = SSL_get_error(ssl, retval);
+		fprintf(stderr, "Server SSL_shutdown failed: ssl_err=%d\n", ssl_err);
+		exit(31);
+	}
+	printf("Server shut down a TLS session.\n");
+
+   if (optVerbose) {
+      printf("Closing socket %d\n", fd);
+   }
+   removeClient(fd);
+	SSL_free(ssl);
+	ssl = 0;
+   close(fd);
+	fd = -1;
 }

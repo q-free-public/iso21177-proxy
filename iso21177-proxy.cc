@@ -31,11 +31,9 @@ int				optProxyIso21177Port = 8866;
 
 const char    *optSecurityEntityAddress = "127.0.0.1";
 int 				optSecurityEntityPort = 3999;
-uint64_t			optProxyIso21177Aid = 623;
-bool				optUseCurrentAtCert = true;
-bool				optForceX509 = false;
-bool           opt1609EcOrAtCertHashOk = false;
-unsigned char  opt1609EcOrAtCertHash[CERT_HASH_LEN];
+uint64_t			optRfc8902Aid = 36;
+bool				optRfc8902UseCurrentAtCert = true;
+unsigned char  optRfc8902EcOrAtCertHash[CERT_HASH_LEN];
 const char    *optCaCertPath = "ca.cert.pem";
 
 const char iso21177_proxy_vsn_string[] = "v0.2 " __DATE__ " " __TIME__;
@@ -61,10 +59,9 @@ void usage(const char *argv0)
    printf("   -iso n                 Port number for ISO 21177 HTTP (default is %d)\n", optProxyRfc8902Port);
 	printf("   -se-host n             Security entity host name (default is %s)\n", optSecurityEntityAddress);
 	printf("   -se-port n             Security entity port number (default is %d)\n", optSecurityEntityPort);
-   printf("   -aid n                 Expected AID from client when using ISO 21177 (default %ld)\n", (long)optProxyIso21177Aid);
-   printf("   -at                    Use current AT certificate\n");
-   printf("   -x509                  Use X.509 certificate\n");
-   printf("   -cert aabbccddeeff     Use 1609 certificate given by this hash. 8 bytes / 16 hex digits\n");
+   printf("   -rfc8902-aid n         Expected AID from client in RFC8902 (default %ld)\n", (long)optRfc8902Aid);
+   printf("   -rfc8902-at            Use current AT certificate (default)\n");
+   printf("   -rfc8902-cert xxxx     Use 1609 certificate given by this hash. 8 bytes / 16 hex digits\n");
    printf("   -l                     List proxy rules\n");
 }
 
@@ -111,23 +108,23 @@ void parseargs(int argc, char *argv[])
       } else if (strcmp(argv[i], "-iso") == 0  && i<argc-1) {
          optProxyIso21177Port = atoi(argv[i+1]);
          i++;
-      } else if (strcmp(argv[i], "-aid") == 0  && i<argc-1) {
-			optProxyIso21177Aid = atol(argv[i+1]);
-			if (optProxyIso21177Aid == 0) {
-				printf("AID error\n");
-				usage(argv[0]);
-				exit(1);
-			}
-         i++;
       } else if (strcmp(argv[i], "-se-port") == 0  && i<argc-1) {
          optSecurityEntityPort = atoi(argv[i+1]);
          i++;
       } else if (strcmp(argv[i], "-se-host") == 0  && i<argc-1) {
          optSecurityEntityAddress = argv[i+1];
          i++;
-      } else if (strcmp(argv[i], "-cert") == 0  && i<argc-1) {
+      } else if (strcmp(argv[i], "-rfc8902-aid") == 0  && i<argc-1) {
+			optRfc8902Aid = atol(argv[i+1]);
+			if (optRfc8902Aid == 0) {
+				printf("RFC8902 AID error\n");
+				usage(argv[0]);
+				exit(1);
+			}
+         i++;
+      } else if (strcmp(argv[i], "-rfc8902-cert") == 0  && i<argc-1) {
 			if (2*CERT_HASH_LEN != strlen(argv[i+1])) {
-				printf("Wrong length hex string %s - expected %d\n", argv[i+1], 2*CERT_HASH_LEN);
+				printf("Wrong length of hex string %s - expected %d hex digits.\n", argv[i+1], 2*CERT_HASH_LEN);
 				usage(argv[0]);
 				exit(1);
 			}
@@ -138,16 +135,12 @@ void parseargs(int argc, char *argv[])
 					printf("Failed to parse hex string for certificate hash: %s\n", argv[i+1]);
 					exit(EXIT_FAILURE);
 				}
-				opt1609EcOrAtCertHash[j] = hex;
+				optRfc8902EcOrAtCertHash[j] = hex;
 			}
-			opt1609EcOrAtCertHashOk = true;
-			optUseCurrentAtCert = false;
+			optRfc8902UseCurrentAtCert = false;
 			i++;
-      } else if (strcmp(argv[i], "-at") == 0) {
-			optUseCurrentAtCert = true;
-			opt1609EcOrAtCertHashOk = false;
-      } else if (strcmp(argv[i], "-x509") == 0) {
-			optForceX509 = true;
+      } else if (strcmp(argv[i], "-rfc8902-at") == 0) {
+			optRfc8902UseCurrentAtCert = true;
       } else {
          printf("Illegal command line option '%s'\n", argv[i]);
          usage(argv[0]);
@@ -426,10 +419,8 @@ int main(int argc, char *argv[])
 		printf("Port number for RFC8902 HTTP:    %d\n", optProxyRfc8902Port);
 		printf("Port number for ISO 21177 HTTP:  %d\n", optProxyIso21177Port);
 		printf("Security entity address:         %s  port %d\n", optSecurityEntityAddress, optSecurityEntityPort);
-		printf("AID (PSID):                      %ld\n", (long) optProxyIso21177Aid);
-		printf("Use default AT certificate:      %s\n", optUseCurrentAtCert ? "yes" : "no");
-		printf("Use X.509 certificate:           %s\n", optForceX509 ? "yes" : "no");
-		printf("Use specific AT/EC certificate:  %s\n", opt1609EcOrAtCertHashOk ? bin2hex(opt1609EcOrAtCertHash, CERT_HASH_LEN) : "Use default AT certificate");
+		printf("RFC8902 AID (PSID):              %ld\n", (long) optRfc8902Aid);
+		printf("Use specific AT/EC certificate:  %s\n", (!optRfc8902UseCurrentAtCert) ? bin2hex(optRfc8902EcOrAtCertHash, CERT_HASH_LEN) : "Use default AT certificate");
 		printf("CA certificate path:             %s\n", optCaCertPath);
    }
 

@@ -63,10 +63,9 @@ public:
 extern int           optVerbose;
 extern const char   *optSecurityEntityAddress;
 extern int           optSecurityEntityPort;
-extern uint64_t      optProxyIso21177Aid;
-extern bool          optUseCurrentAtCert;
-extern bool          optForceX509;
-extern unsigned char opt1609EcOrAtCertHash[CERT_HASH_LEN];
+extern uint64_t      optRfc8902Aid;
+extern bool          optRfc8902UseCurrentAtCert;
+extern unsigned char optRfc8902EcOrAtCertHash[CERT_HASH_LEN];
 
 // Other global variables
 extern std::list<ProxyRule>  rules;

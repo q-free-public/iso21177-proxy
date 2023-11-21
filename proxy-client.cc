@@ -260,9 +260,9 @@ void ProxyClient::handle_get_proxy(T handle, ConnectionClient *conn, const std::
 
 		// Send header lines to client
 		for (auto &h : headers.headerlines) {
-			send(fd, (h + "\r\n").c_str(), h.size() + 2);
+			send(handle, (h + "\r\n").c_str(), h.size() + 2);
 		}
-		send(fd, body.data(), body.size());
+		send(handle, body.data(), body.size());
 		contLen -= body.size();
 
 		while (contLen) {
@@ -284,7 +284,7 @@ void ProxyClient::handle_get_proxy(T handle, ConnectionClient *conn, const std::
 				printf("handle_get_proxy: Body: Len:%d\n", len);
 				// printf("%s\n", bin2hex(buf, len));
 			}
-			send(fd, buf, len);
+			send(handle, buf, len);
 			contLen -= len;
 		}
    } catch (const char *msg) {
@@ -390,8 +390,8 @@ int ssl_print_1609_status(SSL *s)
 	free(remote_ssp);
 	remote_ssp = 0;
 
-	if (remote_psid != optProxyIso21177Aid) {
-		printf("   Expected PSID/AID          %lu - aborting\n", (unsigned long) optProxyIso21177Aid);
+	if (remote_psid != optRfc8902Aid) {
+		printf("   Expected PSID/AID          %lu - aborting\n", (unsigned long) optRfc8902Aid);
 		return 0;
 	}
 	
@@ -400,39 +400,28 @@ int ssl_print_1609_status(SSL *s)
 
 static int ssl_set_RFC8902_values(SSL *ssl, int server_support, int client_support)
 {
-	if (!SSL_enable_RFC8902_support(ssl, server_support, client_support, optUseCurrentAtCert)) {
+	if (!SSL_enable_RFC8902_support(ssl, server_support, client_support, optRfc8902UseCurrentAtCert)) {
 		fprintf(stderr, "SSL_enable_RFC8902_support failed\n");
 		ERR_print_errors_fp(stderr);
 		return 0;
 	}
-	if (optForceX509) {
-		if (1 != SSL_use_PrivateKey_file(ssl, "client.key.pem", SSL_FILETYPE_PEM)) {
-			fprintf(stderr, "SSL_CTX_use_PrivatKey_file failed: ");
-			ERR_print_errors_fp(stderr);
-			return 0;
-		}
-		if (1 != SSL_use_certificate_file(ssl, "client.cert.pem", SSL_FILETYPE_PEM)) {
-			fprintf(stderr, "SSL_CTX_use_certificate_file failed: ");
-			ERR_print_errors_fp(stderr);
-			return 0;
-		}
-	} else {
-		if (!optUseCurrentAtCert) {
-			if (!SSL_use_1609_cert_by_hash(ssl, opt1609EcOrAtCertHash)) {
-				fprintf(stderr, "SSL_use_1609_cert_by_hash failed\n");
-				ERR_print_errors_fp(stderr);
-				return 0;
-			}
-		}
 
-		if (optProxyIso21177Aid > 0) {
-			if (!SSL_use_1609_PSID(ssl, optProxyIso21177Aid)) {
-				fprintf(stderr, "SSL_use_1609_PSID = %d failed\n", (int)optProxyIso21177Aid);
-				ERR_print_errors_fp(stderr);
-				return 0;
-			}
+	if (!optRfc8902UseCurrentAtCert) {
+		if (!SSL_use_1609_cert_by_hash(ssl, optRfc8902EcOrAtCertHash)) {
+			fprintf(stderr, "SSL_use_1609_cert_by_hash failed\n");
+			ERR_print_errors_fp(stderr);
+			return 0;
 		}
 	}
+
+	if (optRfc8902Aid > 0) {
+		if (!SSL_use_1609_PSID(ssl, optRfc8902Aid)) {
+			fprintf(stderr, "SSL_use_1609_PSID = %d failed\n", (int)optRfc8902Aid);
+			ERR_print_errors_fp(stderr);
+			return 0;
+		}
+	}
+
 	return 1;
 }
 
@@ -457,9 +446,6 @@ void ProxyClient::rfc8902_proc(SSL_CTX *ssl_ctx)
 
 	int server_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
 	int client_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
-	if (optForceX509) {
-		server_support = SSL_RFC8902_X509;
-	}
 	if (!ssl_set_RFC8902_values(ssl, server_support, client_support)) {
 		exit(EXIT_FAILURE);
 	}

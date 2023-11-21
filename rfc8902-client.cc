@@ -32,31 +32,20 @@ unsigned char __1609dot2_ec_cert_hash[CERT_HASH_LEN] = {
 uint64_t __1609dot2_psid = 623;
 int set_cert_psid = 0;
 int use_AT_cert = 0;
-
-pid_t server_pid = -1;
 int force_x509 = 0;
 char sec_ent_ip[INET_ADDRSTRLEN] = "127.0.0.1";
 short unsigned int sec_ent_port = 3999;
 char server_ip[INET_ADDRSTRLEN] = "127.0.0.1";
-int do_exit = 0;
+const char *url = "/3023.text";
 
 void handler(int signal) {
     fprintf(stderr, "Server received %d signal\n", signal);
 	if (signal == SIGINT) {
-		fprintf(stderr, "Will initialize the termination\n");
-		do_exit = 1;
+		exit(1);
 	}
 }
 
 
-void terminate() {
-	if (server_pid >= 0) {
-		kill(server_pid, SIGTERM);
-	}
-	exit(EXIT_FAILURE);
-}
-
-FILE *keylog_server_file = NULL;
 FILE *keylog_client_file = NULL;
 
 void keylog_client_cb_func(const SSL *ssl, const char *line) {
@@ -65,15 +54,6 @@ void keylog_client_cb_func(const SSL *ssl, const char *line) {
 		fflush(keylog_client_file);
 	} else {
 		printf("keylog_client_cb_func: %s\n", line);
-	}
-}
-
-void keylog_srv_cb_func(const SSL *ssl, const char *line) {
-	if (keylog_server_file != NULL) {
-		fprintf(keylog_server_file, "%s\n", line);
-		fflush(keylog_server_file);
-	} else {
-		printf("keylog_srv_cb_func: %s\n", line);
 	}
 }
 
@@ -184,240 +164,12 @@ static int ssl_set_RFC8902_values(SSL *ssl, int server_support, int client_suppo
 	return 1;
 }
 
-SSL_CTX *create_context() {
-	SSL_CTX *ret = NULL;
-
-	ret = SSL_CTX_new(TLS_server_method());
-	if (!ret) {
-		fprintf(stderr, "SSL_CTX_new failed\n");
-		return NULL;
-	}
-	SSL_CTX_set_keylog_callback(ret, keylog_srv_cb_func);
-	if (!SSL_CTX_set_min_proto_version(ret, TLS1_3_VERSION)) {
-		fprintf(stderr, "SSL_CTX_set_min_proto_version failed: ");
-		ERR_print_errors_fp(stderr);
-		goto err;
-	}
-	if (1 != SSL_CTX_load_verify_locations(ret, "ca.cert.pem", NULL)) {
-		fprintf(stderr, "SSL_CTX_load_verify_locations failed: ");
-		ERR_print_errors_fp(stderr);
-		goto err;
-	}
-	return ret;
-err:
-	SSL_CTX_free(ret);
-	return NULL;
-}
-
-int create_socket(int port) {
-	int sock;
-	struct sockaddr_in server_addr;
-	int one = 1;
-
-	memset((char *) &server_addr, 0, sizeof(server_addr));  /* 0 out the structure */
-	server_addr.sin_family = AF_INET;   /* address family */
-	server_addr.sin_port = htons(port);
-	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-	/* Server */
-	sock = socket(AF_INET, SOCK_STREAM, 0);
-	if (sock < 0) {
-		perror("socket failed");
-		goto err;
-	}
-	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one))) {
-		perror("setsockopt failed\n");
-		goto err;
-	}
-	if (bind(sock, (const struct sockaddr *) &server_addr, sizeof(server_addr))) {
-		perror("bind failed");
-		goto err;
-	}
-	if (listen(sock, 1)) {
-		perror("listen failed");
-		goto err;
-	}
-
-	return sock;
-err:
-	close(sock);
-	return -1;
-}
-
-void server(int server_port, int test_mode) {
-	char buffer[1024];
-	int processed;
-	SSL_CTX *ssl_ctx;
-	int sock;
-	int retval;
-
-	keylog_server_file = fopen("keylog_server.txt", "a");
-	if (keylog_server_file == NULL) {
-		perror("Error opening file!");
-		exit(EXIT_FAILURE);
-	}
-
-	struct sigaction action;
-	sigset_t sigset;
-
-	printf("Server\n");
-
-	sigemptyset(&sigset);
-	action.sa_handler = handler;
-	action.sa_flags = 0;
-	action.sa_mask = sigset;
-	sigaction(SIGPIPE, &action, NULL);
-	sigaction(SIGINT, &action, NULL);
-
-	ssl_ctx = create_context();
-	if(ssl_ctx == NULL) {
-		fprintf(stderr, "create_context failed\n");
-		exit(EXIT_FAILURE);
-	}
-
-	sock = create_socket(server_port);
-	if(sock <= 0) {
-		fprintf(stderr, "create_socket failed\n");
-		SSL_CTX_free(ssl_ctx);
-		exit(EXIT_FAILURE);
-	}
-
-	int handle_clients = 1;
-	while (handle_clients && !do_exit) {
-		SSL *ssl;
-		int client;
-
-		printf("Waiting for client to connect.. \n");
-
-		client = accept(sock, NULL, 0);
-		if (client < 0) {
-			perror("accept failed");
-			continue;
-		}
-		printf("TCP accepted.\n");
-
-		/*if (!OPENSSL_init_ssl(0, NULL)) {
-			fprintf(stderr, "OPENSSL_init_ssl failed\n");
-			exit(EXIT_FAILURE);
-		}*/
-		/*OpenSSL_add_ssl_algorithms();*/
-		ssl = SSL_new(ssl_ctx);
-		if (!ssl) {
-			fprintf(stderr, "SSL_new failed\n");
-			exit(EXIT_FAILURE);
-		}
-		if (!SSL_set_1609_sec_ent_addr(ssl, sec_ent_port, sec_ent_ip)) {
-			fprintf(stderr, "SSL_set_1609_sec_ent_addr failed\n");
-			ERR_print_errors_fp(stderr);
-			exit(EXIT_FAILURE);
-		}
-		int server_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
-		int client_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
-		if (force_x509) {
-			server_support = SSL_RFC8902_X509;
-		}
-		if (!ssl_set_RFC8902_values(ssl, server_support, client_support)) {
-			exit(EXIT_FAILURE);
-		}
-		if (!SSL_set_fd(ssl, client)) {
-			fprintf(stderr, "SSL_set_fd failed\n");
-			exit(EXIT_FAILURE);
-		}
-	#if OPENSSL_VERSION_NUMBER >= 0x1010100fL
-		/* TLS 1.3 server sends session tickets after a handhake as part of
-		 * the SSL_accept(). If a client finishes all its job before server
-		 * sends the tickets, SSL_accept() fails with EPIPE errno. Since we
-		 * are not interested in a session resumption, we can not to send the
-		 * tickets. */
-		/*if (1 != SSL_set_num_tickets(ssl, 0)) {
-			fprintf(stderr, "SSL_set_num_tickets failed\n");
-			exit(EXIT_FAILURE);
-		}
-		Or we can perform two-way shutdown. Client must call SSL_read() before
-		the final SSL_shutdown(). */
-	#endif
-
-		retval = SSL_accept(ssl);
-		if (retval <= 0) {
-			fprintf(stderr, "SSL_accept failed ssl_err=%d errno=%s\n",
-			        SSL_get_error(ssl, retval), strerror(errno));
-			ERR_print_errors_fp(stderr);
-			continue;
-		}
-		printf("SSL accepted.\n");
-		if (ssl_print_1609_status(ssl) == 0) {
-			continue;
-		}
-
-		while (1) {
-			if ((processed = ssl_recv_message(ssl, buffer, sizeof(buffer))) > 0) {
-				printf("[server:] %.*s\n", (int) processed, buffer);
-				ssl_send_message(ssl, buffer, processed);
-				if (strncmp(buffer, "shutdown\n", processed) == 0) {
-					printf("received a shutdown request");
-					handle_clients = 0;
-					break;
-				}
-			} else {
-				int ssl_error = SSL_get_error(ssl, processed);
-				ERR_print_errors_fp(stderr);
-				if (ssl_error == SSL_ERROR_ZERO_RETURN) {
-					printf("Server thinks a client closed a TLS session\n");
-					break;
-				}
-				if (ssl_error != SSL_ERROR_WANT_READ &&
-				    ssl_error != SSL_ERROR_WANT_WRITE) {
-					fprintf(stderr, "server read failed: ssl_error=%d:\n", ssl_error);
-					break;
-				}
-				break;
-			}
-		}
-		printf("Server read finished.\n");
-
-		retval = SSL_shutdown(ssl);
-		if (retval < 0) {
-			int ssl_err = SSL_get_error(ssl, retval);
-			fprintf(stderr, "Server SSL_shutdown failed: ssl_err=%d\n", ssl_err);
-			continue;
-		}
-		printf("Server shut down a TLS session.\n");
-
-		if (retval != 1) {
-			retval = SSL_shutdown(ssl);
-			if (retval != 1) {
-				int ssl_err = SSL_get_error(ssl, retval);
-				fprintf(stderr,
-				        "Waiting for client shutdown using SSL_shutdown failed: "
-				        "ssl_err=%d\n", ssl_err);
-				terminate();
-			}
-		}
-		printf("Server thinks a client shut down the TLS session.\n");
-
-		SSL_free(ssl);
-		close(client);
-		if (test_mode) {
-			printf("Server exiting test mode...\n");
-			handle_clients = 0;
-		}
-	}
-
-	close(sock);
-	SSL_CTX_free(ssl_ctx);
-	if (keylog_server_file != NULL) {
-		fflush(keylog_server_file);
-		fclose(keylog_server_file);
-	}
-	exit(EXIT_SUCCESS);
-}
-
-void client(int server_port, int test_mode) {
+void client(int server_port, int test_mode)
+{
 	int client_socket = -1;
 	SSL_CTX *ssl_ctx = 0;
 	SSL *ssl = 0;
 	int processed = 0;
-	int wstatus;
 	int retval;
 
 	struct sigaction action;
@@ -436,34 +188,33 @@ void client(int server_port, int test_mode) {
 	}
 
 	/* Client */
-    printf("Client connection to %s at port %d\n", server_ip, server_port);
-    client_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (client_socket < 0) {
-        perror("socket failed");
-		terminate();
-    }
+	printf("Client connection to %s at port %d\n", server_ip, server_port);
+	client_socket = socket(AF_INET, SOCK_STREAM, 0);
+	if (client_socket < 0) {
+		perror("socket failed");
+		exit(1);
+	}
 	struct sockaddr_in server_addr;
 	memset((char*)&server_addr, 0, sizeof(server_addr));  /* 0 out the structure */
 	server_addr.sin_family = AF_INET;   /* address family */
 	server_addr.sin_port = htons(server_port);
 	server_addr.sin_addr.s_addr = inet_addr(server_ip);
-    if (connect(client_socket, (const struct sockaddr *)&server_addr, sizeof(server_addr))) {
-        perror("connect failed");
-		terminate();
-    }
-    printf("TCP connected.\n");
+	if (connect(client_socket, (const struct sockaddr *)&server_addr, sizeof(server_addr))) {
+		perror("connect failed");
+		exit(1);
+	}
+	printf("TCP connected.\n");
 
-    /*if (!OPENSSL_init_ssl(0, NULL)) {
-        fprintf(stderr, "OPENSSL_init_ssl failed\n");
-        kill(server_pid, SIGTERM);
-        exit(EXIT_FAILURE);
-    }*/
-    /*OpenSSL_add_ssl_algorithms();*/
-    ssl_ctx = SSL_CTX_new(TLS_client_method());
-    if (!ssl_ctx) {
-        fprintf(stderr, "SSL_CTX_new failed\n");
-		terminate();
-    }
+	/*if (!OPENSSL_init_ssl(0, NULL)) {
+		fprintf(stderr, "OPENSSL_init_ssl failed\n");
+		exit(EXIT_FAILURE);
+	}*/
+	/*OpenSSL_add_ssl_algorithms();*/
+	ssl_ctx = SSL_CTX_new(TLS_client_method());
+	if (!ssl_ctx) {
+		fprintf(stderr, "SSL_CTX_new failed\n");
+		exit(1);
+	}
 	SSL_CTX_set_keylog_callback(ssl_ctx, keylog_client_cb_func);
 	if (!SSL_CTX_set_min_proto_version(ssl_ctx, TLS1_3_VERSION)) {
 		fprintf(stderr, "SSL_CTX_set_min_proto_version failed: ");
@@ -480,15 +231,15 @@ void client(int server_port, int test_mode) {
     if (!ssl) {
 		ERR_print_errors_fp(stderr);
         fprintf(stderr, "SSL_new failed\n");
-		terminate();
+		exit(1);
     }
 	if (!SSL_set_1609_sec_ent_addr(ssl, sec_ent_port, sec_ent_ip)) {
 		fprintf(stderr, "SSL_set_1609_sec_ent_addr failed\n");
 		ERR_print_errors_fp(stderr);
 		exit(EXIT_FAILURE);
 	}
-    int server_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
-    int client_support = SSL_RFC8902_1609 | SSL_RFC8902_X509;
+    int server_support = SSL_RFC8902_1609; //  | SSL_RFC8902_X509;
+    int client_support = SSL_RFC8902_1609; //  | SSL_RFC8902_X509;
     if (force_x509) {
     	client_support = SSL_RFC8902_X509;
     }
@@ -498,20 +249,20 @@ void client(int server_port, int test_mode) {
     if (!SSL_set_fd(ssl, client_socket)) {
 		ERR_print_errors_fp(stderr);
         fprintf(stderr, "SSL_set_fd failed\n");
-        terminate();
+        exit(1);
     }
     if (SSL_connect(ssl) <= 0) {
 		ERR_print_errors_fp(stderr);
         fprintf(stderr, "SSL_connect failed\n");
-        terminate();
+        exit(1);
     }
     printf("SSL connected.\n");
     if (ssl_print_1609_status(ssl) <= 0) {
-    	terminate();
+    	exit(1);
     }
 
     int send_messages = 1;
-    while (send_messages && !do_exit) {
+    while (send_messages) {
 		 char line[1024];
 	    size_t line_len = 1024;
 
@@ -524,24 +275,22 @@ void client(int server_port, int test_mode) {
 
 	    ssize_t ret_line_len = 0;
 	    if (test_mode) {
-			ret_line_len = sprintf(line, "GET /3023.text HTTP/1.1\r\n\r\n");
+			ret_line_len = sprintf(line, "GET %s HTTP/1.1\r\n\r\n", url);
 	    } else {
 			 printf("input message to server, type exit or ^C to quit, send \"shutdown\" to stop the server\n");
 			 char *line_ptr = line;
 			 line_len = sizeof(line);
 		    if ((ret_line_len = getline(&line_ptr, &line_len, stdin)) == -1) {
-			    fprintf(stderr, "getline failed\n");
-				if (!do_exit) {
-			    	terminate();
-				} else {
+			      fprintf(stderr, "getline failed\n");
+				   exit(1);
+			 } else {
 					break;
-				}
 		    }
 	    }
 
 		 printf("Read '%s'\n", line);
 	    if (ssl_send_message(ssl, line, ret_line_len) < 0) {
-	    	terminate();
+	    	exit(1);
 	    }
 	    if ((processed = ssl_recv_message(ssl, line, sizeof(line))) <= 0) {
 		    int ssl_error = SSL_get_error(ssl, processed);
@@ -554,7 +303,7 @@ void client(int server_port, int test_mode) {
 		    if (ssl_error != SSL_ERROR_WANT_READ && ssl_error != SSL_ERROR_WANT_WRITE) {
 			    fprintf(stderr, "Client read failed: ssl_error=%d errno=%s: \n", ssl_error, strerror(errno));
 			    ERR_print_errors_fp(stderr);
-			    terminate();
+			    exit(1);
 		    }
 	    }
 
@@ -574,7 +323,7 @@ void client(int server_port, int test_mode) {
         int ssl_err = SSL_get_error(ssl, retval);
         fprintf(stderr, "Client SSL_shutdown failed: ssl_err=%d\n", ssl_err);
 		ERR_print_errors_fp(stderr);
-        terminate();
+        exit(1);
     }
     printf("Client shut down TLS session.\n");
 
@@ -589,14 +338,14 @@ void client(int server_port, int test_mode) {
         if (retval != 1) {
             int ssl_err = SSL_get_error(ssl, retval);
             fprintf(stderr, "Waiting for server shutdown using SSL_shutdown failed: ssl_err=%d\n", ssl_err);
-			   terminate();
+			   exit(1);
         }
     }
     printf("Client thinks a server shut down the TLS session.\n");
 
     if (shutdown(client_socket, SHUT_RDWR)) {
         perror("client shutdown failed");
-		terminate();
+		exit(1);
     }
     printf("Client shut down TCP.\n");
 
@@ -604,36 +353,20 @@ void client(int server_port, int test_mode) {
     SSL_CTX_free(ssl_ctx);
 	fclose(keylog_client_file);
 
-	if (server_pid >= 0) {
-		if (server_pid == waitpid(server_pid, &wstatus, 0)) {
-			if (WIFEXITED(wstatus)){
-				printf("Server process terminated normally with %d exit code\n",
-				WEXITSTATUS(wstatus));
-			} else if (WIFSIGNALED(wstatus)) {
-				printf("Server process terminated with %d signal\n",
-				WTERMSIG(wstatus));
-			}
-		}
-	}
-
     exit(EXIT_SUCCESS);
 }
 
 int main(int argc, char **argv)
 {
 	short unsigned int server_port = 3322;
-	int start_client = 0;
-	int start_server = 0;
 	int http_client_mode = 0;
 	int opt, rc;
 	unsigned long long ull;
 
 	printf("Test program for TLS 1.3 with RF8902 support\n");
 
-	while ((opt = getopt(argc, argv, "p:a:csHxn:b:de:f:")) != -1) {
+	while ((opt = getopt(argc, argv, "p:a:Hxn:b:de:f:")) != -1) {
 		switch (opt) {
-		case 'c': start_client = 1; break;
-		case 's': start_server = 1; break;
 		case 'p':
 			rc = sscanf(optarg, "%hu", &server_port);
 			if (rc < 1) {
@@ -688,19 +421,25 @@ int main(int argc, char **argv)
 			}
 			break;
 		default:
-			fprintf(stderr, "Usage: %s [-p port] [-c -> client] [-s -> server]\n"
-					"  -H - http client mode\n"
-					"  -x - force X509 cert\n"
-					"  -a - server address\n"
-					"  -d - use current AT certificate\n"
-					"  -n PSID - specify PSID value (default %llu)\n"
-					"  -b HASH - specify cert hash to use\n"
-					"  -e ADDR - sec_ent address \n"
-					"  -f PORT - sec_ent port\n", argv[0], (long long unsigned int) __1609dot2_psid);
+			fprintf(stderr, "Usage: %s [options] [FILE]\n"
+					"  -p port  - server port\n"
+					"  -a host  - server address\n"
+					"  -H       - http client mode\n"
+					"  -x       - force X509 cert\n"
+					"  -d       - use current AT certificate\n"
+					"  -n PSID  - specify PSID value (default %llu)\n"
+					"  -b HASH  - specify cert hash to use\n"
+					"  -e ADDR  - sec_ent address\n"
+					"  -f PORT  - sec_ent port\n"
+					"  FILE     - File part of the URL (starting with /, default is '%s')\n", argv[0], (long long unsigned int) __1609dot2_psid, url);
 			exit(EXIT_FAILURE);
 		}
 	}
 
+	if (optind < argc) {
+		url = argv[optind++];
+   }
+			  
 	printf("Using port %hu\n", server_port);
 	printf("Connecting to sec_ent at %s port %hu\n", sec_ent_ip, sec_ent_port);
 	if (use_AT_cert) {
@@ -714,32 +453,9 @@ int main(int argc, char **argv)
 	} else {
 		printf(" with default PSID 36\n");
 	}
+	printf("URL (file part): %s\n", url);
 
-	if (!(start_client || start_server)) {
-		http_client_mode = 1;
-		start_client = 1;
-		start_server = 1;
-	}
-
-	if (start_client && start_server) {
-		http_client_mode = 1;
-	    server_pid = fork();
-	    if (server_pid < 0) {
-	        perror("fork failed");
-	        exit(EXIT_FAILURE);
-	    } else if (server_pid == 0) {
-			server(server_port, http_client_mode);
-	    }
-		sleep(1);
-		client(server_port, http_client_mode);
-	} else {
-		if (start_client) {
-			client(server_port, http_client_mode);
-		}
-		if (start_server) {
-			server(server_port, http_client_mode);
-		}
-	}
-
-
+	client(server_port, http_client_mode);
+	
+	return 0;
 }

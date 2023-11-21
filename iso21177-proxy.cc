@@ -180,14 +180,17 @@ void removeClient(int fd)
 {
    for (auto it=clientList.begin(); it!=clientList.end(); ++it) {
       if (it->fd == fd) {
-         printf("removeClient: Mark client with fd=%d serial=%d as completed\n", fd, it->serial);
+			if (optVerbose >= 1) {
+				printf("removeClient: Mark client with fd=%d serial=%d as completed\n", fd, it->serial);
+			}
          it->completed = true;
          it->fd = -1;
          time(&it->closeTime);
          return;
       }
    }
-   printf("client with fd=%d not found\n", fd);
+
+   printf("Error: client with fd=%d not found\n", fd);
 }
 
 void cleanupClients()
@@ -243,7 +246,9 @@ int create_server_socket(int port)
 }
 
 void keylog_srv_cb_func(const SSL *ssl, const char *line) {
-	printf("keylog_srv_cb_func: %s\n", line);
+   if (optVerbose >= 1) {
+		printf("%s\n", line);
+	}
 }
 
 bool create_context(CtxWrapper &ret)
@@ -373,8 +378,6 @@ const char *bin2hex(const unsigned char *bin, unsigned int len)
 
 void init_openssl_library(void)
 {
-	printf("init_openssl_library\n");
-
 	/* https://www.openssl.org/docs/ssl/SSL_library_init.html */
 	SSL_library_init();
 
@@ -415,6 +418,7 @@ int main(int argc, char *argv[])
       printf("iso21177-proxy\n");
       unsigned long xx = OPENSSL_VERSION_NUMBER; // MN NF FP PS: major minor fix patch status
       printf("openssl verion:                  %ld.%ld.%ldp%ld (%ld)\n", (xx >> 28), (xx>>20)&0xff, (xx>>12)&0xff, (xx>>4)&0xff, (xx&0x0f));
+		printf("Verbose:                         %d\n", optVerbose);
 		printf("Port number for plain HTTP:      %d\n", optProxyPlainPort);
 		printf("Port number for RFC8902 HTTP:    %d\n", optProxyRfc8902Port);
 		printf("Port number for ISO 21177 HTTP:  %d\n", optProxyIso21177Port);
@@ -432,10 +436,8 @@ int main(int argc, char *argv[])
    httpPlainThread = std::thread(plain_http_thread_proc);
    httpRfc8902Thread = std::thread(rfc8902_http_thread_proc);
 
-	printf("Waiting for join\n");
 	httpPlainThread.join();
 	httpRfc8902Thread.join();
-	printf("join completed\n");
 	
 	return 0;
 }

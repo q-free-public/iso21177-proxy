@@ -38,9 +38,9 @@ void ProxyClient::client_proc()
    }
 
    try {
-      if (optVerbose) {
+      if (optVerbose > 1) {
 			printf("Header is complete\n");
-			if (optVerbose > 1) {
+			if (optVerbose > 2) {
 				for (auto &line : headers.headerlines) {
 					printf("%s\n", line.c_str());
 				}
@@ -62,8 +62,8 @@ void ProxyClient::client_proc()
    if (optVerbose) {
       printf("Closing socket %d\n", fd);
    }
-   removeClient(fd);
    close(fd);
+   removeClient(fd);
 	fd = -1;
 }
 
@@ -109,11 +109,20 @@ void ProxyClient::send(SSL *ssl, const void *data_p, unsigned int len)
 	}
 }
 
+std::string replace(std::string subject, const std::string& search, const std::string& replace) {
+    size_t pos = 0;
+    while ((pos = subject.find(search, pos)) != std::string::npos) {
+         subject.replace(pos, search.length(), replace);
+         pos += replace.length();
+    }
+    return subject;
+}
+
 template<typename T>
 void ProxyClient::send(T handle, const std::string &hdr, const unsigned char *body, unsigned int body_len)
 {
 	if (optVerbose) {
-		printf("Sending Header: %s\nFollowed by %u bytes body.\n", hdr.c_str(), body_len);
+		printf("Sending %d bytes header %s\nFollowed by %u bytes body.\n", (int)hdr.size(), replace(hdr, "\r\n", " CRLF ").c_str(), body_len);
 	}
 
 	send(handle, hdr.c_str(), hdr.size());
@@ -301,13 +310,15 @@ template<typename T>
 void ProxyClient::handle_get(T handle, const std::string &file)
 {
 	if (optVerbose) {
-		printf("Handle get: %s\n", file.c_str());
+		printf("handle_get: %s\n", file.c_str());
 	}
 
 	// Check if this as an proxy alias
 	for (auto &r : rules) {
 		if (file.find(r.src_file) == 0) {
-			printf("Proxy rule match: %s --> %s:%d%s\n", r.src_file.c_str(), r.dst_host.c_str(), r.dst_port, r.dst_file.c_str());
+			if (optVerbose) {
+				printf("Proxy rule match: %s --> %s:%d%s\n", r.src_file.c_str(), r.dst_host.c_str(), r.dst_port, r.dst_file.c_str());
+			}
 			ConnectionClient *conn = 0;
 			if (r.dst_https)
 				conn = new ConnectionClientTls;
@@ -362,7 +373,9 @@ void ProxyClient::handle_get(T handle, const std::string &file)
 
 int ssl_print_1609_status(SSL *s)
 {
-	printf("Information about the other side of the connection:\n");
+   if (optVerbose) {
+		printf("Information about the other side of the connection:\n");
+	}
 	uint64_t remote_psid;
 	uint8_t *remote_ssp = NULL;
 	size_t remote_ssp_len;
@@ -382,16 +395,18 @@ int ssl_print_1609_status(SSL *s)
 		return 0;
 	}
 
-	printf("   Peer verification:         %ld - %s\n", verify_result, verify_result == 0 ? "OK" : "FAIL");
-	printf("   PSID/AID used for TLS is:  %lu\n", (unsigned long)remote_psid);
-	printf("   SSP used for TLS are       %s\n", bin2hex(remote_ssp, remote_ssp_len));
-	printf("   Cert used for TLS is       %s\n", bin2hex(remote_cert_hash, CERT_HASH_LEN));
+   if (optVerbose) {
+		printf("   Peer verification:         %ld - %s\n", verify_result, verify_result == 0 ? "OK" : "FAIL");
+		printf("   PSID/AID used for TLS is:  %lu\n", (unsigned long)remote_psid);
+		printf("   SSP used for TLS are       %s\n", bin2hex(remote_ssp, remote_ssp_len));
+		printf("   Cert used for TLS is       %s\n", bin2hex(remote_cert_hash, CERT_HASH_LEN));
+	}
 
 	free(remote_ssp);
 	remote_ssp = 0;
 
 	if (remote_psid != optRfc8902Aid) {
-		printf("   Expected PSID/AID          %lu - aborting\n", (unsigned long) optRfc8902Aid);
+		printf("   Expected PSID/AID          %lu, peer had %ld - aborting\n", (unsigned long) optRfc8902Aid, (unsigned long) remote_psid);
 		return 0;
 	}
 	
@@ -465,97 +480,98 @@ void ProxyClient::rfc8902_proc(SSL_CTX *ssl_ctx)
 		fprintf(stderr, "SSL_set_num_tickets failed\n");
 		exit(EXIT_FAILURE);
 	}
-	Or we can perform two-way shutdown. Client must call SSL_read() before
-	the final SSL_shutdown(). */
+	Or we can perform two-way shutdown. Client must call SSL_read() before the final SSL_shutdown(). */
 #endif
 
 	int retval = SSL_accept(ssl);
 	if (retval <= 0) {
 		fprintf(stderr, "SSL_accept failed ssl_err=%d errno=%s\n", SSL_get_error(ssl, retval), strerror(errno));
 		ERR_print_errors_fp(stderr);
-		return;
-	}
-	printf("SSL accepted.\n");
-
-	if (ssl_print_1609_status(ssl) == 0) {
-		// Certificates error
-		fprintf(stderr, "Insufficient right - aborting\n");
 	} else {
-		// Certificates OK
-
-		// Read request from HTTP client
-		HttpHeaders headers;
-		while (!headers.is_complete()) {
-			char buf[1000];
-			int len = SSL_read(ssl, buf, sizeof(buf)-1);
-			if (len == 0) {
-				if (optVerbose) {
-					printf("proxyRfc8902ClientProc: eof?  len=%d\n", len);
-				}
-				break;
-			} else if (len < 0) {
-				if (optVerbose) {
-					int ssl_error = SSL_get_error(ssl, len);
-					ERR_print_errors_fp(stderr);
-					if (ssl_error == SSL_ERROR_ZERO_RETURN) {
-						printf("Server thinks a client closed a TLS session\n");
-					} else if (ssl_error != SSL_ERROR_WANT_READ &&
-						ssl_error != SSL_ERROR_WANT_WRITE) {
-						fprintf(stderr, "server read failed: ssl_error=%d:\n", ssl_error);
-					}
-				}
-				break;
-			}
-			if (optVerbose > 1) {
-				printf("proxyRfc8902ClientProc: Len:%d  Header: %*.*s\n", len, len, len, buf);
-			}
-			recvBytes += len;
-			headers.add_data(buf, len);
+		if (optVerbose) {
+			printf("SSL accept success. ssl=%p\n", ssl);
 		}
 
-		// Send data to client:
-		// ssl_send_message(ssl, buffer, processed);
+		if (ssl_print_1609_status(ssl) == 0) {
+			// Certificates error
+			fprintf(stderr, "Insufficient right - aborting\n");
+		} else {
+			// Certificates OK
 
-		try {
-			if (optVerbose) {
-				printf("RFC8902 Header is complete\n");
+			// Read request from HTTP client
+			HttpHeaders headers;
+			while (!headers.is_complete()) {
+				char buf[1000];
+				int len = SSL_read(ssl, buf, sizeof(buf)-1);
+				if (len == 0) {
+					if (optVerbose) {
+						printf("proxyRfc8902ClientProc: eof?  len=%d\n", len);
+					}
+					break;
+				} else if (len < 0) {
+					if (optVerbose) {
+						int ssl_error = SSL_get_error(ssl, len);
+						ERR_print_errors_fp(stderr);
+						if (ssl_error == SSL_ERROR_ZERO_RETURN) {
+							printf("Server thinks a client closed a TLS session\n");
+						} else if (ssl_error != SSL_ERROR_WANT_READ &&
+							ssl_error != SSL_ERROR_WANT_WRITE) {
+							fprintf(stderr, "server read failed: ssl_error=%d:\n", ssl_error);
+						}
+					}
+					break;
+				} else {
+					if (optVerbose > 1) {
+						printf("proxyRfc8902ClientProc: Len:%d  Header: %*.*s\n", len, len, len, buf);
+					}
+					recvBytes += len;
+					headers.add_data(buf, len);
+				}
+			}
+
+			// Send data to client:
+			// ssl_send_message(ssl, buffer, processed);
+
+			try {
 				if (optVerbose > 1) {
-					for (auto &line : headers.headerlines) {
-						printf("%s\n", line.c_str());
+					printf("RFC8902 Header is complete\n");
+					if (optVerbose > 2) {
+						for (auto &line : headers.headerlines) {
+							printf("%s\n", line.c_str());
+						}
 					}
+					printf("Verb:  %s\n", headers.get_verb().c_str());
+					printf("Proto: %s\n", headers.get_protocol().c_str());
+					printf("File:  %s\n", headers.get_file().c_str());
 				}
-				printf("Verb:  %s\n", headers.get_verb().c_str());
-				printf("Proto: %s\n", headers.get_protocol().c_str());
-				printf("File:  %s\n", headers.get_file().c_str());
-			}
 
-			if (headers.get_verb() == "GET") {
-				handle_get(ssl, headers.get_file());
-			} else {
-				emit_error(ssl, 500, "Illegal verb: " + headers.get_verb());
+				if (headers.get_verb() == "GET") {
+					handle_get(ssl, headers.get_file());
+				} else {
+					emit_error(ssl, 500, "Illegal verb: " + headers.get_verb());
+				}
+			} catch (const char *msg) {
+				printf("Catched exception: %s\n", msg);
 			}
-		} catch (const char *msg) {
-			printf("Catched exception: %s\n", msg);
+		}
+
+		if (optVerbose) {
+			printf("Server shut down a TLS session ssl=%p.\n", ssl);
+		}
+		retval = SSL_shutdown(ssl);
+		if (retval < 0) {
+			int ssl_err = SSL_get_error(ssl, retval);
+			fprintf(stderr, "Server SSL_shutdown failed: ssl_err=%d\n", ssl_err);
 		}
 	}
-
-   if (optVerbose) {
-      printf("Do SSL shutdown\n");
-   }
-	retval = SSL_shutdown(ssl);
-	if (retval < 0) {
-		int ssl_err = SSL_get_error(ssl, retval);
-		fprintf(stderr, "Server SSL_shutdown failed: ssl_err=%d\n", ssl_err);
-		exit(31);
-	}
-	printf("Server shut down a TLS session.\n");
 
    if (optVerbose) {
       printf("Closing socket %d\n", fd);
    }
-   removeClient(fd);
 	SSL_free(ssl);
 	ssl = 0;
-   close(fd);
+   retval = close(fd);
+	printf("retval after close(fd=%d) --> %d:  %s\n", fd, (int) retval, strerror(errno));
+   removeClient(fd);
 	fd = -1;
 }

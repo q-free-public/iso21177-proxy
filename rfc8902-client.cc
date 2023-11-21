@@ -17,26 +17,30 @@
 #include <pcap.h>
 #include <arpa/inet.h>
 
+#include "http-headers.h"
+
 /* Managed by IANA */
- enum CertificateType{
+enum CertificateType {
 	 CertificateTypeX509 = 0,
 	 CertificateTypeRawPublicKey = 2,
 	 CertificateType1609Dot2 = 3
- } ;
-
+};
 
 #define CERT_HASH_LEN 8
-unsigned char __1609dot2_ec_cert_hash[CERT_HASH_LEN] = {
-	0xC4, 0x3B, 0x88, 0xB2, 0x35, 0x81, 0xDD, 0x3B
-};
-uint64_t __1609dot2_psid = 623;
-int set_cert_psid = 0;
-int use_AT_cert = 0;
-int force_x509 = 0;
-char sec_ent_ip[INET_ADDRSTRLEN] = "127.0.0.1";
-short unsigned int sec_ent_port = 3999;
-char server_ip[INET_ADDRSTRLEN] = "127.0.0.1";
-const char *url = "/3023.text";
+
+unsigned char      optAtOrEcCertHash[CERT_HASH_LEN] = { 0xC4, 0x3B, 0x88, 0xB2, 0x35, 0x81, 0xDD, 0x3B };
+uint64_t           optPsid = 36;
+int                optSetCertPsid = 0;
+int                optUseAtCert = 0;
+int                optForceX509 = 0;
+char               optSecEntHost[INET_ADDRSTRLEN] = "127.0.0.1";
+short unsigned int optSecEntPort = 3999;
+char               optServerHost[INET_ADDRSTRLEN] = "127.0.0.1";
+short unsigned int optServerPort = 3322;
+bool               optHttpMode = false;
+const char        *optUrl = "/3023.text";
+
+FILE *keylog_client_file = NULL;
 
 void handler(int signal) {
     fprintf(stderr, "Server received %d signal\n", signal);
@@ -44,9 +48,6 @@ void handler(int signal) {
 		exit(1);
 	}
 }
-
-
-FILE *keylog_client_file = NULL;
 
 void keylog_client_cb_func(const SSL *ssl, const char *line) {
 	if (keylog_client_file != NULL) {
@@ -63,7 +64,8 @@ void print_hex_array(int len, const unsigned char * ptr) {
 	}
 }
 
-int ssl_send_message(SSL *s, char * message, size_t message_len) {
+int ssl_send_message(SSL *s, char * message, size_t message_len)
+{
 	int processed = 0;
 
 	printf("Sending [%zd] %.*s\n", message_len, (int)message_len, message);
@@ -84,31 +86,32 @@ int ssl_send_message(SSL *s, char * message, size_t message_len) {
 	return processed;
 }
 
-int ssl_recv_message(SSL *s, char * buff, size_t buff_len) {
-	int processed;
-
-	processed = SSL_read(s, buff, buff_len);
-	printf("SSL_read returned %d\n", processed);
+int ssl_recv_message(SSL *s, char * buff, size_t buff_len)
+{
+	int processed = SSL_read(s, buff, buff_len);
 	if (processed > 0) {
-		printf("[recv:] max:%d  ret:%d  %.*s\n", (int) buff_len, (int)processed, (int)processed, buff);
+		printf("SSL_read: max:%d  ret:%d\n%.*s\n", (int) buff_len, processed, processed, buff);
+	} else {
+		printf("SSL_read: Error  ret:%d\n", processed);
 	}
 	return processed;
 }
 
-int ssl_print_1609_status(SSL *s) {
+int ssl_print_1609_status(SSL *s)
+{
 	printf("Information about the other side of the connection:\n");
 	uint64_t psid;
 	size_t ssp_len;
 	uint8_t *ssp = NULL;
 	unsigned char hashed_id[CERT_HASH_LEN];
 
-	if(SSL_get_1609_psid_received(s, &psid, &ssp_len, &ssp, hashed_id) <= 0) {
+	if (SSL_get_1609_psid_received(s, &psid, &ssp_len, &ssp, hashed_id) <= 0) {
 		ERR_print_errors_fp(stderr);
 		fprintf(stderr, "SSL_get_1609_psid_received failed\n");
 		return 0;
 	}
 	long verify_result = 0;
-	if((verify_result = SSL_get_verify_result(s)) != X509_V_OK) {
+	if ((verify_result = SSL_get_verify_result(s)) != X509_V_OK) {
 		ERR_print_errors_fp(stderr);
 		fprintf(stderr, "SSL_get_verify_result failed %ld\n", verify_result);
 		free(ssp);
@@ -125,16 +128,23 @@ int ssl_print_1609_status(SSL *s) {
 	printf("\n");
 
 	free(ssp);
+	ssp = 0;
+
+	if (psid != optPsid) {
+		printf("   Expected PSID/AID      %lu, peer had %ld - aborting\n", (unsigned long) optPsid, (unsigned long) psid);
+		return 0;
+	}
+
 	return 1;
 }
 
 static int ssl_set_RFC8902_values(SSL *ssl, int server_support, int client_support) {
-	if (!SSL_enable_RFC8902_support(ssl, server_support, client_support, use_AT_cert)) {
+	if (!SSL_enable_RFC8902_support(ssl, server_support, client_support, optUseAtCert)) {
 		fprintf(stderr, "SSL_enable_RFC8902_support failed\n");
 		ERR_print_errors_fp(stderr);
 		return 0;
 	}
-	if (force_x509) {
+	if (optForceX509) {
 		if (1 != SSL_use_PrivateKey_file(ssl, "client.key.pem", SSL_FILETYPE_PEM)) {
 			fprintf(stderr, "SSL_CTX_use_PrivatKey_file failed: ");
 			ERR_print_errors_fp(stderr);
@@ -146,15 +156,15 @@ static int ssl_set_RFC8902_values(SSL *ssl, int server_support, int client_suppo
 			return 0;
 		}
 	} else {
-		if (!use_AT_cert) {
-			if (!SSL_use_1609_cert_by_hash(ssl, __1609dot2_ec_cert_hash)) {
+		if (!optUseAtCert) {
+			if (!SSL_use_1609_cert_by_hash(ssl, optAtOrEcCertHash)) {
 				fprintf(stderr, "SSL_use_1609_cert_by_hash failed\n");
 				ERR_print_errors_fp(stderr);
 				return 0;
 			}
 		}
-		if (set_cert_psid) {
-			if (!SSL_use_1609_PSID(ssl, __1609dot2_psid)) {
+		if (optSetCertPsid) {
+			if (!SSL_use_1609_PSID(ssl, optPsid)) {
 				fprintf(stderr, "SSL_use_1609_PSID failed\n");
 				ERR_print_errors_fp(stderr);
 				return 0;
@@ -164,7 +174,7 @@ static int ssl_set_RFC8902_values(SSL *ssl, int server_support, int client_suppo
 	return 1;
 }
 
-void client(int server_port, int test_mode)
+void client()
 {
 	int client_socket = -1;
 	SSL_CTX *ssl_ctx = 0;
@@ -188,7 +198,7 @@ void client(int server_port, int test_mode)
 	}
 
 	/* Client */
-	printf("Client connection to %s at port %d\n", server_ip, server_port);
+	printf("Client connection to %s at port %d\n", optServerHost, optServerPort);
 	client_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if (client_socket < 0) {
 		perror("socket failed");
@@ -197,8 +207,8 @@ void client(int server_port, int test_mode)
 	struct sockaddr_in server_addr;
 	memset((char*)&server_addr, 0, sizeof(server_addr));  /* 0 out the structure */
 	server_addr.sin_family = AF_INET;   /* address family */
-	server_addr.sin_port = htons(server_port);
-	server_addr.sin_addr.s_addr = inet_addr(server_ip);
+	server_addr.sin_port = htons(optServerPort);
+	server_addr.sin_addr.s_addr = inet_addr(optServerHost);
 	if (connect(client_socket, (const struct sockaddr *)&server_addr, sizeof(server_addr))) {
 		perror("connect failed");
 		exit(1);
@@ -233,14 +243,14 @@ void client(int server_port, int test_mode)
         fprintf(stderr, "SSL_new failed\n");
 		exit(1);
     }
-	if (!SSL_set_1609_sec_ent_addr(ssl, sec_ent_port, sec_ent_ip)) {
+	if (!SSL_set_1609_sec_ent_addr(ssl, optSecEntPort, optSecEntHost)) {
 		fprintf(stderr, "SSL_set_1609_sec_ent_addr failed\n");
 		ERR_print_errors_fp(stderr);
 		exit(EXIT_FAILURE);
 	}
     int server_support = SSL_RFC8902_1609; //  | SSL_RFC8902_X509;
     int client_support = SSL_RFC8902_1609; //  | SSL_RFC8902_X509;
-    if (force_x509) {
+    if (optForceX509) {
     	client_support = SSL_RFC8902_X509;
     }
 	if (!ssl_set_RFC8902_values(ssl, server_support, client_support)) {
@@ -261,6 +271,7 @@ void client(int server_port, int test_mode)
     	exit(1);
     }
 
+	 HttpHeaders headers;
     int send_messages = 1;
     while (send_messages) {
 		 char line[1024];
@@ -274,8 +285,8 @@ void client(int server_port, int test_mode)
 		}
 
 	    ssize_t ret_line_len = 0;
-	    if (test_mode) {
-			ret_line_len = sprintf(line, "GET %s HTTP/1.1\r\n\r\n", url);
+	    if (optHttpMode) {
+			ret_line_len = sprintf(line, "GET %s HTTP/1.1\r\n\r\n", optUrl);
 	    } else {
 			 printf("input message to server, type exit or ^C to quit, send \"shutdown\" to stop the server\n");
 			 char *line_ptr = line;
@@ -307,12 +318,13 @@ void client(int server_port, int test_mode)
 		    }
 	    }
 
-	    printf("Client write finished.\n");
+		 headers.add_data(line, processed);
+	    printf("Client write finished. received %d bytes\n", processed);
 	    if (strcmp(line, "exit\n") == 0) {
 		    printf("Exiting client...\n");
 		    send_messages = 0;
 	    }
-	    if (test_mode) {
+	    if (optHttpMode) {
 	    	printf("Client exiting HTTP request mode...\n");
 	    	send_messages = 0;
 	    }
@@ -330,9 +342,16 @@ void client(int server_port, int test_mode)
     if (retval != 1) {
         /* Consume all server's data to access the server's shutdown */
 	     char buff[1000-30];
-	     while (ssl_recv_message(ssl, buff, sizeof(buff)) > 0) {
-			  printf("looping\n");
+		  int totlen = 0;
+		  int loopcnt = 0;
+	     while (true) {
+				int len = ssl_recv_message(ssl, buff, sizeof(buff));
+				if (len <= 0) break;
+			   totlen += len;
+			   loopcnt++;
+			   printf("looping %d %d\n", totlen, loopcnt);
         }
+		  printf("Client received %d bytes in %d loops.  ContentLen was %d bytes\n", totlen, loopcnt, headers.get_content_length());
 
         retval = SSL_shutdown(ssl);
         if (retval != 1) {
@@ -358,8 +377,6 @@ void client(int server_port, int test_mode)
 
 int main(int argc, char **argv)
 {
-	short unsigned int server_port = 3322;
-	int http_client_mode = 0;
 	int opt, rc;
 	unsigned long long ull;
 
@@ -368,16 +385,16 @@ int main(int argc, char **argv)
 	while ((opt = getopt(argc, argv, "p:a:Hxn:b:de:f:")) != -1) {
 		switch (opt) {
 		case 'p':
-			rc = sscanf(optarg, "%hu", &server_port);
+			rc = sscanf(optarg, "%hu", &optServerPort);
 			if (rc < 1) {
 				fprintf(stderr, "String-integer conversion error for %s\n", optarg);
 				exit(EXIT_FAILURE);
 			}
 			break;
-		case 'H': http_client_mode = 1; break;
-		case 'x': force_x509 = 1; break;
+		case 'H': optHttpMode = true; break;
+		case 'x': optForceX509 = 1; break;
 		case 'a':
-			strncpy(server_ip, optarg, INET_ADDRSTRLEN);
+			strncpy(optServerHost, optarg, INET_ADDRSTRLEN);
 			break;
 		case 'n':
 			rc = sscanf(optarg, "%llu", &ull);
@@ -385,8 +402,8 @@ int main(int argc, char **argv)
 				fprintf(stderr, "String-integer conversion error for %s\n", optarg);
 				exit(EXIT_FAILURE);
 			}
-			__1609dot2_psid = ull;
-			set_cert_psid = 1;
+			optPsid = ull;
+			optSetCertPsid = 1;
 			break;
 		case 'b': {
 			const char * pos_str = optarg;
@@ -396,7 +413,7 @@ int main(int argc, char **argv)
 				exit(EXIT_FAILURE);
 			}
 			for (int i = 0; i < CERT_HASH_LEN; i++) {
-				rc = sscanf(pos_str, "%2hhx", &__1609dot2_ec_cert_hash[pos_hash]);
+				rc = sscanf(pos_str, "%2hhx", &optAtOrEcCertHash[pos_hash]);
 				if (rc < 1) {
 					fprintf(stderr, "Failed to parse hex string %s\n", optarg);
 					exit(EXIT_FAILURE);
@@ -404,19 +421,19 @@ int main(int argc, char **argv)
 				pos_hash++;
 				pos_str += 2;
 			}
-			set_cert_psid = 1;
+			optSetCertPsid = 1;
 			}	
 			break;
 		case 'd':
-			use_AT_cert = 1;
+			optUseAtCert = 1;
 			break;
 		case 'e':
-			strncpy(sec_ent_ip, optarg, INET_ADDRSTRLEN);
+			strncpy(optSecEntHost, optarg, INET_ADDRSTRLEN);
 			break;
 		case 'f':
-			rc = sscanf(optarg, "%hu", &sec_ent_port);
-			if (rc < 1) {
-				fprintf(stderr, "String-integer conversion error for %s\n", optarg);
+			rc = sscanf(optarg, "%hu", &optSecEntPort);
+			if (rc < 1 || optSecEntPort > 0xffff) {
+				fprintf(stderr, "Error for security entity port number: %s\n", optarg);
 				exit(EXIT_FAILURE);
 			}
 			break;
@@ -431,31 +448,32 @@ int main(int argc, char **argv)
 					"  -b HASH  - specify cert hash to use\n"
 					"  -e ADDR  - sec_ent address\n"
 					"  -f PORT  - sec_ent port\n"
-					"  FILE     - File part of the URL (starting with /, default is '%s')\n", argv[0], (long long unsigned int) __1609dot2_psid, url);
+					"  FILE     - File part of the URL (starting with /, default is '%s')\n", argv[0], (long long unsigned int) optPsid, optUrl);
 			exit(EXIT_FAILURE);
 		}
 	}
 
 	if (optind < argc) {
-		url = argv[optind++];
+		// Command line argument after the options.
+		optUrl = argv[optind++];
    }
 			  
-	printf("Using port %hu\n", server_port);
-	printf("Connecting to sec_ent at %s port %hu\n", sec_ent_ip, sec_ent_port);
-	if (use_AT_cert) {
+	printf("Using port %hu\n", optServerPort);
+	printf("Connecting to sec_ent at %s port %hu\n", optSecEntHost, optSecEntPort);
+	if (optUseAtCert) {
 		printf("Using current (default) AT certficate");
 	} else {
 		printf("Using certificate ");
-		print_hex_array(CERT_HASH_LEN, __1609dot2_ec_cert_hash);
+		print_hex_array(CERT_HASH_LEN, optAtOrEcCertHash);
 	}
-	if (set_cert_psid) {
-		printf(" with PSID %llu\n", (long long unsigned int)__1609dot2_psid);
+	if (optSetCertPsid) {
+		printf(" with PSID %llu\n", (long long unsigned int)optPsid);
 	} else {
 		printf(" with default PSID 36\n");
 	}
-	printf("URL (file part): %s\n", url);
+	printf("URL (file part): %s\n", optUrl);
 
-	client(server_port, http_client_mode);
+	client();
 	
 	return 0;
 }

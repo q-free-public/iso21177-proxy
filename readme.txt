@@ -46,5 +46,9 @@ iso21177-proxy -se-host 192.168.21.247 -vv -aid 36
 
 Run RFC8902 HTTP client test tool:
 ----------------------------------
-tls_client -e 192.168.21.247 -c -p 8877 -d -n 36 -H
+tls_client -e 192.168.21.247 -p 8877 -d -n 36 -H FILE
+FILE can be:
+/nnnn.text
+/its1-100
+/its1-s
 

@@ -72,6 +72,7 @@ void ProxyClient::send(int sd, const void *data_p, unsigned int len)
 	const char *data = (const char*) data_p;
 	unsigned int pos = 0;
 	while (pos < len) {
+		errno = 0;
 		int ret = write(sd, data + pos, len);
 		if (optVerbose) {
 			printf("Sending %u bytes on fd=%d  -->  sent %d  Err:%d %s\n", len, sd, ret, errno, strerror(errno));
@@ -89,6 +90,7 @@ void ProxyClient::send(SSL *ssl, const void *data_p, unsigned int len)
 	const char *data = (const char*) data_p;
 	unsigned int pos = 0;
 	while (pos < len) {
+		errno = 0;
 		int ret = SSL_write(ssl, data + pos, len);
 		if (optVerbose) {
 			printf("Sending %u bytes on ssl=%p  -->  sent %d  Err:%d %s\n", len, ssl, ret, errno, strerror(errno));

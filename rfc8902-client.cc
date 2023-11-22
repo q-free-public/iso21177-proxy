@@ -16,6 +16,7 @@
 #include <getopt.h>
 #include <pcap.h>
 #include <arpa/inet.h>
+#include <string>
 
 #include "http-headers.h"
 
@@ -68,7 +69,7 @@ int ssl_send_message(SSL *s, char * message, size_t message_len)
 {
 	int processed = 0;
 
-	printf("Sending [%zd] %.*s\n", message_len, (int)message_len, message);
+//	printf("Sending [%zd] %.*s\n", message_len, (int)message_len, message);
 	for (const char *start = message; start - message < (int)message_len; start += processed) {
 
 		processed = SSL_write(s, start, message_len - (start - message));
@@ -172,6 +173,15 @@ static int ssl_set_RFC8902_values(SSL *ssl, int server_support, int client_suppo
 		}
 	}
 	return 1;
+}
+
+std::string replace(std::string subject, const std::string& search, const std::string& replace) {
+    size_t pos = 0;
+    while ((pos = subject.find(search, pos)) != std::string::npos) {
+         subject.replace(pos, search.length(), replace);
+         pos += replace.length();
+    }
+    return subject;
 }
 
 void client()
@@ -299,7 +309,7 @@ void client()
 		    }
 	    }
 
-		 printf("Read '%s'\n", line);
+		 printf("Sending '%s'\n", replace(line, "\r\n", " CRLF ").c_str());
 	    if (ssl_send_message(ssl, line, ret_line_len) < 0) {
 	    	exit(1);
 	    }

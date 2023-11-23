@@ -38,7 +38,6 @@ char               optSecEntHost[INET_ADDRSTRLEN] = "127.0.0.1";
 short unsigned int optSecEntPort = 3999;
 char               optServerHost[INET_ADDRSTRLEN] = "127.0.0.1";
 short unsigned int optServerPort = 3322;
-bool               optHttpMode = false;
 const char        *optUrl = "/3023.text";
 
 FILE *keylog_client_file = NULL;
@@ -281,11 +280,18 @@ void client()
     	exit(1);
     }
 
+	 // Send HTTP GET request
+	 char line[1024];
+	 ssize_t ret_line_len = sprintf(line, "GET %s HTTP/1.1\r\n\r\n", optUrl);
+	 printf("Sending '%s'\n", replace(line, "\r\n", " CRLF ").c_str());
+	 if (ssl_send_message(ssl, line, ret_line_len) < 0) {
+		exit(1);
+	 }
+
+	 // Wait for headers
 	 HttpHeaders headers;
-    int send_messages = 1;
-    while (send_messages) {
-		 char line[1024];
-	    size_t line_len = 1024;
+	 std::vector<unsigned char> remaining;
+    while (!headers.is_complete()) {
 
 		int ssl_error = SSL_get_error(ssl, processed);
 		ERR_print_errors_fp(stderr);
@@ -294,25 +300,6 @@ void client()
 			ERR_print_errors_fp(stderr);
 		}
 
-	    ssize_t ret_line_len = 0;
-	    if (optHttpMode) {
-			ret_line_len = sprintf(line, "GET %s HTTP/1.1\r\n\r\n", optUrl);
-	    } else {
-			 printf("input message to server, type exit or ^C to quit, send \"shutdown\" to stop the server\n");
-			 char *line_ptr = line;
-			 line_len = sizeof(line);
-		    if ((ret_line_len = getline(&line_ptr, &line_len, stdin)) == -1) {
-			      fprintf(stderr, "getline failed\n");
-				   exit(1);
-			 } else {
-					break;
-		    }
-	    }
-
-		 printf("Sending '%s'\n", replace(line, "\r\n", " CRLF ").c_str());
-	    if (ssl_send_message(ssl, line, ret_line_len) < 0) {
-	    	exit(1);
-	    }
 	    if ((processed = ssl_recv_message(ssl, line, sizeof(line))) <= 0) {
 		    int ssl_error = SSL_get_error(ssl, processed);
 		    ERR_print_errors_fp(stderr);
@@ -328,17 +315,14 @@ void client()
 		    }
 	    }
 
-		 headers.add_data(line, processed);
-	    printf("Client write finished. received %d bytes\n", processed);
-	    if (strcmp(line, "exit\n") == 0) {
-		    printf("Exiting client...\n");
-		    send_messages = 0;
-	    }
-	    if (optHttpMode) {
-	    	printf("Client exiting HTTP request mode...\n");
-	    	send_messages = 0;
-	    }
+		 remaining = headers.add_data(line, processed);
+	    printf("Client write finished. received %d bytes, Got %d surplus bytes (payload)\n", processed, (int)remaining.size());
     }
+	 
+	 printf("Reply protocol:       %s\n", headers.get_reply_protocol().c_str());
+	 printf("Reply status:         %d\n", headers.get_reply_status());
+	 printf("Reply content-length: %d\n", headers.get_content_length());
+	 printf("Reply content-type:   %s\n", headers.get_content_type().c_str());
 
     retval = SSL_shutdown(ssl);
     if (retval < 0) {
@@ -349,10 +333,11 @@ void client()
     }
     printf("Client shut down TLS session.\n");
 
+	 // Wait for the payload
     if (retval != 1) {
         /* Consume all server's data to access the server's shutdown */
 	     char buff[1000-30];
-		  int totlen = 0;
+		  int totlen = (int)remaining.size();
 		  int loopcnt = 0;
 	     while (true) {
 				int len = ssl_recv_message(ssl, buff, sizeof(buff));
@@ -401,7 +386,6 @@ int main(int argc, char **argv)
 				exit(EXIT_FAILURE);
 			}
 			break;
-		case 'H': optHttpMode = true; break;
 		case 'x': optForceX509 = 1; break;
 		case 'a':
 			strncpy(optServerHost, optarg, INET_ADDRSTRLEN);
@@ -451,7 +435,6 @@ int main(int argc, char **argv)
 			fprintf(stderr, "Usage: %s [options] [FILE]\n"
 					"  -p port  - server port\n"
 					"  -a host  - server address\n"
-					"  -H       - http client mode\n"
 					"  -x       - force X509 cert\n"
 					"  -d       - use current AT certificate\n"
 					"  -n PSID  - specify PSID value (default %llu)\n"

@@ -18,7 +18,7 @@ utils.o: utils.cc utils.h
 proxy-client.o: proxy-client.cc proxy-client.h http-headers.h connection-client.h
 connection-client-tcp.o: connection-client-tcp.cc connection-client.h
 connection-client-tls.o: connection-client-tls.cc connection-client.h
-rfc8902-client.o: rfc8902-client.cc
+rfc8902-client.o: rfc8902-client.cc http-headers.h
 
 openssl-test.o: openssl-test.cc
 	$(CXX) $(CXXOPTS) -O -c $<

@@ -27,6 +27,11 @@ public:
 		return (!headerlines.empty() && headerlines.back().empty());
 	}
 
+	bool iequals(const std::string& a, const std::string& b)
+	{
+		return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](char a, char b) { return tolower(a) == tolower(b); });
+	}
+
 	std::string get_verb() {
 		if (!is_complete()) throw "Header is not complete";
 		std::vector<std::string> parts = split_on_space(headerlines.front());
@@ -58,16 +63,45 @@ public:
 		return parts[2];
 	}
 
+	std::string get_reply_protocol() {
+		if (!is_complete()) throw "Header is not complete";
+		std::vector<std::string> parts = split_on_space(headerlines.front());
+		if (parts.size() < 2) throw "First header line does not have 2 or more components";
+
+		return parts[0];
+	}
+
+	int get_reply_status() {
+		if (!is_complete()) throw "Header is not complete";
+		std::vector<std::string> parts = split_on_space(headerlines.front());
+		if (parts.size() < 2) throw "First header line does not have 2 or more components";
+
+		return stoi(parts[1]);
+	}
+
 	int get_content_length()
 	{
 		const std::string tag("Content-Length:");
 		for (auto &h : headerlines) {
-			if (h.find(tag) == 0) {
+			if (iequals(tag, h.substr(0, tag.size()))) {
 				int len = std::stoi(h.substr(tag.size()));
 				return len;
 			}
 		}
 		return -1;
+	}
+
+	std::string get_content_type()
+	{
+		const std::string tag("Content-Type:");
+		for (auto &h : headerlines) {
+			if (iequals(tag, h.substr(0, tag.size()))) {
+				unsigned int pos = tag.size();
+				while (pos < h.size() && h[pos] == ' ') pos++;
+				return h.substr(pos);
+			}
+		}
+		return "";
 	}
 	
 	std::vector<std::string> split_on_space(const std::string &str)

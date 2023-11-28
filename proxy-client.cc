@@ -45,15 +45,17 @@ void ProxyClient::client_proc()
 					printf("%s\n", line.c_str());
 				}
 			}
-		   printf("Verb:  %s\n", headers.get_verb().c_str());
-		   printf("Proto: %s\n", headers.get_protocol().c_str());
-		   printf("File:  %s\n", headers.get_file().c_str());
+		   printf("Verb:  %s\n", headers.get_request_verb().c_str());
+		   printf("Proto: %s\n", headers.get_request_protocol().c_str());
+		   printf("File:  %s\n", headers.get_request_file().c_str());
       }
 
-	   if (headers.get_verb() == "GET") {
-		   handle_get(fd, headers.get_file());
+	   if (headers.get_request_verb() == "GET") {
+		   handle_get(fd, headers.get_request_file());
+		} else if (headers.get_request_verb() == "POST") {
+			handle_post(fd, headers.get_request_file(), headers.get_content_type(), headers.get_content_length());
 	   } else {
-		   emit_error(fd, 500, "Illegal verb: " + headers.get_verb());
+		   emit_error(fd, 500, "Illegal verb: " + headers.get_request_verb());
 	   }
    } catch (const char *msg) {
       printf("Catched exception: %s\n", msg);
@@ -109,6 +111,37 @@ void ProxyClient::send(SSL *ssl, const void *data_p, unsigned int len)
 		pos += ret;
 		len -= ret;
 	}
+}
+
+int ProxyClient::recv(SSL *ssl, void *data_p, unsigned int len)
+{
+	char *data = (char *) data_p;
+	int ret = SSL_read(ssl, data, len);
+	if (ret < 0) {
+		if (optVerbose) {
+			int ssl_error = SSL_get_error(ssl, ret);
+			ERR_print_errors_fp(stderr);
+			if (ssl_error == SSL_ERROR_ZERO_RETURN) {
+				printf("recv(ssl): Server thinks a client closed a TLS session\n");
+			} else if (ssl_error != SSL_ERROR_WANT_READ &&
+				ssl_error != SSL_ERROR_WANT_WRITE) {
+				fprintf(stderr, "srecv(ssl): erver read failed: ssl_error=%d:\n", ssl_error);
+			}
+		}
+	}
+	
+	return ret;
+}
+
+int ProxyClient::recv(int sd, void *data_p, unsigned int len)
+{
+	errno = 0;
+	printf("doing read(sd=%d, ..., len=%d)\n", sd, len);
+	char *data = (char *) data_p;
+	int ret = read(sd, data, len);
+	printf("done ret=%d   errno=%d\n", ret, errno);
+	
+	return ret;
 }
 
 std::string replace(std::string subject, const std::string& search, const std::string& replace) {
@@ -306,6 +339,56 @@ void ProxyClient::handle_get_proxy(T handle, ConnectionClient *conn, const std::
       printf("Closing connection to %s\n", rule.dst_host.c_str());
    }
    conn->close();
+}
+
+template<typename T>
+void ProxyClient::handle_post(T handle, const std::string &file, const std::string &content_type, int content_length)
+{
+	if (optVerbose) {
+		printf("handle_post: File:%s    ContentType:%s   ContentLen:%d\n", file.c_str(), content_type.c_str(), content_length);
+	}
+	
+	std::string hdr1, body1;
+	hdr1 += "HTTP/1.1 100 Continue\r\n";
+	hdr1 += "\r\n";
+	send(handle, hdr1, body1);
+	
+	int cnt = 0;
+   while (content_length > 0) {
+		if (optVerbose) {
+			printf("handle_post: wait for data remaining=%d\n", content_length);
+		}
+      char buf[1000];
+      int len = recv(handle, buf, std::min((int)sizeof(buf), content_length));
+      if (len == 0) {
+         if (optVerbose) {
+            printf("handle_post: eof?  len=%d\n", len);
+         }
+         break;
+      }
+      if (len < 0) {
+         if (optVerbose) {
+            perror("handle_post: read error");
+         }
+         break;
+      }
+		if (optVerbose > 1) {
+			printf("handle_post: Cnt:%d  Len:%d  Body: %*.*s\n", cnt, len, len, len, buf);
+		}
+		cnt++;
+		content_length -= len;
+   }
+
+	if (optVerbose > 1) {
+		printf("handle_post: File is complete\n");
+	}
+
+	std::string hdr, body;
+	hdr += "HTTP/1.1 201 Created\r\n";
+	hdr += "Content-Length: 0\r\n";
+	hdr += "Connection: close\r\n";
+	hdr += "\r\n";
+	send(handle, hdr, body);
 }
 
 template<typename T>
@@ -542,15 +625,17 @@ void ProxyClient::rfc8902_proc(SSL_CTX *ssl_ctx)
 							printf("%s\n", line.c_str());
 						}
 					}
-					printf("Verb:  %s\n", headers.get_verb().c_str());
-					printf("Proto: %s\n", headers.get_protocol().c_str());
-					printf("File:  %s\n", headers.get_file().c_str());
+					printf("Verb:  %s\n", headers.get_request_verb().c_str());
+					printf("Proto: %s\n", headers.get_request_protocol().c_str());
+					printf("File:  %s\n", headers.get_request_file().c_str());
 				}
 
-				if (headers.get_verb() == "GET") {
-					handle_get(ssl, headers.get_file());
+				if (headers.get_request_verb() == "GET") {
+					handle_get(ssl, headers.get_request_file());
+				} else if (headers.get_request_verb() == "POST") {
+					handle_post(ssl, headers.get_request_file(), headers.get_content_type(), headers.get_content_length());
 				} else {
-					emit_error(ssl, 500, "Illegal verb: " + headers.get_verb());
+					emit_error(ssl, 500, "Illegal verb: " + headers.get_request_verb());
 				}
 			} catch (const char *msg) {
 				printf("Catched exception: %s\n", msg);

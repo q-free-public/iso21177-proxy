@@ -32,7 +32,7 @@ public:
 		return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](char a, char b) { return tolower(a) == tolower(b); });
 	}
 
-	std::string get_verb() {
+	std::string get_request_verb() {
 		if (!is_complete()) throw "Header is not complete";
 		std::vector<std::string> parts = split_on_space(headerlines.front());
 		if (parts.size() != 3) throw "First header line does not have 3 components";
@@ -40,7 +40,7 @@ public:
 		return parts[0];
 	}
 
-	std::string get_file() {
+	std::string get_request_file() {
 		if (!is_complete()) throw "Header is not complete";
 		std::vector<std::string> parts = split_on_space(headerlines.front());
 		if (parts.size() != 3) throw "First header line does not have 3 components";
@@ -55,7 +55,7 @@ public:
 		return filename;
 	}
 
-	std::string get_protocol() {
+	std::string get_request_protocol() {
 		if (!is_complete()) throw "Header is not complete";
 		std::vector<std::string> parts = split_on_space(headerlines.front());
 		if (parts.size() != 3) throw "First header line does not have 3 components";

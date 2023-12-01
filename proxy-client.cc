@@ -135,11 +135,8 @@ int ProxyClient::recv(SSL *ssl, void *data_p, unsigned int len)
 
 int ProxyClient::recv(int sd, void *data_p, unsigned int len)
 {
-	errno = 0;
-	printf("doing read(sd=%d, ..., len=%d)\n", sd, len);
 	char *data = (char *) data_p;
 	int ret = read(sd, data, len);
-	printf("done ret=%d   errno=%d\n", ret, errno);
 	
 	return ret;
 }
@@ -355,7 +352,7 @@ void ProxyClient::handle_post(T handle, const std::string &file, const std::stri
 	
 	int cnt = 0;
    while (content_length > 0) {
-		if (optVerbose) {
+		if (optVerbose > 1) {
 			printf("handle_post: wait for data remaining=%d\n", content_length);
 		}
       char buf[1000];
@@ -379,12 +376,12 @@ void ProxyClient::handle_post(T handle, const std::string &file, const std::stri
 		content_length -= len;
    }
 
-	if (optVerbose > 1) {
+	if (optVerbose) {
 		printf("handle_post: File is complete\n");
 	}
 
 	std::string hdr, body;
-	hdr += "HTTP/1.1 201 Created\r\n";
+	hdr += "HTTP/1.1 202 Accepted\r\n";
 	hdr += "Content-Length: 0\r\n";
 	hdr += "Connection: close\r\n";
 	hdr += "\r\n";

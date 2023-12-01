@@ -356,6 +356,7 @@ void ProxyClient::handle_post(T handle, const std::string &file, const std::stri
 			printf("handle_post: wait for data remaining=%d\n", content_length);
 		}
       char buf[1000];
+      memset(buf, 0, sizeof(buf));
       int len = recv(handle, buf, std::min((int)sizeof(buf), content_length));
       if (len == 0) {
          if (optVerbose) {
@@ -371,6 +372,8 @@ void ProxyClient::handle_post(T handle, const std::string &file, const std::stri
       }
 		if (optVerbose > 1) {
 			printf("handle_post: Cnt:%d  Len:%d  Body: %*.*s\n", cnt, len, len, len, buf);
+            for (int q=0; q<len && q<200; q++) printf("%02x ", (buf[q] & 0xff));
+            printf("\n");
 		}
 		cnt++;
 		content_length -= len;

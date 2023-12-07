@@ -1,4 +1,9 @@
 // http-headers.h
+//
+// This file is identical in projects:
+//   cits-lte-catm1-test
+//   cits-iso21177-proxy
+//
 
 #include <string>
 #include <list>
@@ -6,7 +11,7 @@
 
 class HttpHeaders {
 public:
-	std::vector<unsigned char> add_data(char *buf, int len) {
+	std::vector<unsigned char> add_data(const char *buf, int len) {
 		for (int i=0; i<len; i++) {
 			if (buf[i] == '\n') {
 				headerlines.push_back(line);
@@ -21,6 +26,11 @@ public:
 		}
 		
 		return std::vector<unsigned char>();
+	}
+
+	void clear() {
+		headerlines.clear();
+		line.clear();
 	}
 
 	bool is_complete() {

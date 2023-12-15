@@ -349,8 +349,15 @@ void ProxyClient::handle_post(T handle, const std::string &file, const std::stri
 	hdr1 += "HTTP/1.1 100 Continue\r\n";
 	hdr1 += "\r\n";
 	send(handle, hdr1, body1);
+
+	std::string filename = get_log_filename("/tmp", "lte-http-post");
+	FILE *f = fopen(filename.c_str(), "w");
+	if (f) {
+		fprintf(f, "Content-Length: %d\n", content_length);
+	}
 	
 	int cnt = 0;
+	int byte_cnt = 0;
    while (content_length > 0) {
 		if (optVerbose > 1) {
 			printf("handle_post: wait for data remaining=%d\n", content_length);
@@ -375,12 +382,22 @@ void ProxyClient::handle_post(T handle, const std::string &file, const std::stri
             for (int q=0; q<len && q<200; q++) printf("%02x ", (buf[q] & 0xff));
             printf("\n");
 		}
+		if (f) {
+			fwrite(buf, len, 1, f);
+		}
 		cnt++;
+		byte_cnt += len;
 		content_length -= len;
    }
 
 	if (optVerbose) {
 		printf("handle_post: File is complete\n");
+	}
+
+	if (f) {
+		fprintf(f, "\nBytes received: %d\n", byte_cnt);
+		fclose(f);
+		f = 0;
 	}
 
 	std::string hdr, body;

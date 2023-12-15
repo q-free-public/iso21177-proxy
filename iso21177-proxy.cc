@@ -150,6 +150,26 @@ void parseargs(int argc, char *argv[])
    }
 }
 
+std::string get_log_filename(const std::string &dir, const std::string &prefix)
+{
+	time_t tNow;
+	time(&tNow);
+	struct tm * tmNow = gmtime(&tNow);
+	char szDatepart[256];
+	sprintf(szDatepart, "%04d-%02d-%02d-%02d-%02d-%02d", tmNow->tm_year+1900, tmNow->tm_mon+1, tmNow->tm_mday, tmNow->tm_hour, tmNow->tm_min, tmNow->tm_sec);
+
+//   mkdir(dir.c_str(), 0777);
+
+   std::string fn = dir;
+   fn += "/";
+   fn += prefix;
+   fn += "-";
+   fn += szDatepart;
+   fn += ".txt";
+
+   return fn;
+}
+
 ProxyClient *addClient(int fd, const struct sockaddr_in6 &addrClient)
 {
 	static int serial = 0;

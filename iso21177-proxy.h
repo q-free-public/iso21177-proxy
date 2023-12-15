@@ -73,3 +73,4 @@ extern std::list<ProxyRule>  rules;
 // Global functions
 extern void        removeClient(int fd);
 extern const char *bin2hex(const unsigned char *bin, unsigned int len);
+extern std::string get_log_filename(const std::string &dir, const std::string &prefix);

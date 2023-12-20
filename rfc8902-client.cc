@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include<netdb.h>
 #include <signal.h>
 #include <errno.h>
 #include <openssl/ssl.h>
@@ -34,11 +35,12 @@ uint64_t           optPsid = 36;
 int                optSetCertPsid = 0;
 int                optUseAtCert = 0;
 int                optForceX509 = 0;
-char               optSecEntHost[INET_ADDRSTRLEN] = "127.0.0.1";
+char               optSecEntHost[200] = "127.0.0.1";
 short unsigned int optSecEntPort = 3999;
-char               optServerHost[INET_ADDRSTRLEN] = "127.0.0.1";
+char               optServerHost[200] = "127.0.0.1";
 short unsigned int optServerPort = 3322;
 const char        *optUrl = "/3023.text";
+std::string        prog_dir;
 
 FILE *keylog_client_file = NULL;
 
@@ -183,6 +185,20 @@ std::string replace(std::string subject, const std::string& search, const std::s
     return subject;
 }
 
+std::string find_file(const char *filename)
+{
+	const std::string slash("/");
+	if (access(filename, R_OK) == 0)
+		return filename;
+	if (access((slash + filename).c_str(), R_OK) == 0)
+		return (slash + filename).c_str();
+	if (access((prog_dir + "/" + filename).c_str(), R_OK) == 0)
+		return (prog_dir + "/" + filename).c_str();
+	
+	return filename;
+}
+
+
 void client()
 {
 	int client_socket = -1;
@@ -200,13 +216,14 @@ void client()
 	sigaction(SIGPIPE, &action, NULL);
 	sigaction(SIGINT, &action, NULL);
 
-	keylog_client_file = fopen("keylog_client.txt", "a");
+	std::string keylog_file = "/tmp/keylog_client.txt";
+	keylog_client_file = fopen(keylog_file.c_str(), "a");
 	if (keylog_client_file == NULL) {
-		perror("Error opening file!");
+		perror(("Error opening " + keylog_file).c_str());
 		exit(EXIT_FAILURE);
 	}
+	printf("Saving TLS keys to %s for Wireshark debugging purpose\n", keylog_file.c_str());
 
-	/* Client */
 	printf("Client connection to %s at port %d\n", optServerHost, optServerPort);
 	client_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if (client_socket < 0) {
@@ -214,15 +231,26 @@ void client()
 		exit(1);
 	}
 	struct sockaddr_in server_addr;
-	memset((char*)&server_addr, 0, sizeof(server_addr));  /* 0 out the structure */
-	server_addr.sin_family = AF_INET;   /* address family */
+	memset((char*)&server_addr, 0, sizeof(server_addr));
+	server_addr.sin_family = AF_INET;
 	server_addr.sin_port = htons(optServerPort);
-	server_addr.sin_addr.s_addr = inet_addr(optServerHost);
+	if (inet_addr(optServerHost) == (in_addr_t)(-1)) {
+		const struct hostent *he = gethostbyname(optServerHost);
+		if (he == 0) {
+			fprintf(stderr, "gethostbyname failed for %s\n", optServerHost);
+			exit(1);
+		}
+		const struct in_addr **addr_list = (const struct in_addr **) he->h_addr_list;
+		server_addr.sin_addr = *addr_list[0];
+	} else {
+		server_addr.sin_addr.s_addr = inet_addr(optServerHost);
+	}
+
 	if (connect(client_socket, (const struct sockaddr *)&server_addr, sizeof(server_addr))) {
 		perror("connect failed");
 		exit(1);
 	}
-	printf("TCP connected.\n");
+	printf("TCP connected to RFC8902 proxy server.\n");
 
 	/*if (!OPENSSL_init_ssl(0, NULL)) {
 		fprintf(stderr, "OPENSSL_init_ssl failed\n");
@@ -240,11 +268,14 @@ void client()
 		ERR_print_errors_fp(stderr);
 		exit(EXIT_FAILURE);
 	}
-	if (1 != SSL_CTX_load_verify_locations(ssl_ctx, "ca.cert.pem", NULL)) {
+	std::string ca_file = find_file("ca.cert.pem");
+	if (1 != SSL_CTX_load_verify_locations(ssl_ctx, ca_file.c_str(), NULL)) {
+		fprintf(stderr, "Unable to open %s\n", ca_file.c_str());
 		fprintf(stderr, "SSL_CTX_load_verify_locations failed: ");
 		ERR_print_errors_fp(stderr);
 		exit(EXIT_FAILURE);
 	}
+	printf("Using CA file %s\n", ca_file.c_str());
 	SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
     ssl = SSL_new(ssl_ctx);
     if (!ssl) {
@@ -376,6 +407,11 @@ int main(int argc, char **argv)
 	unsigned long long ull;
 
 	printf("Test program for TLS 1.3 with RF8902 support\n");
+	
+	prog_dir = ".";
+	if (strchr(argv[0], '/')) {
+		prog_dir = std::string(argv[0], strrchr(argv[0], '/'));
+	}
 
 	while ((opt = getopt(argc, argv, "p:a:Hxn:b:de:f:")) != -1) {
 		switch (opt) {
@@ -388,7 +424,7 @@ int main(int argc, char **argv)
 			break;
 		case 'x': optForceX509 = 1; break;
 		case 'a':
-			strncpy(optServerHost, optarg, INET_ADDRSTRLEN);
+			strncpy(optServerHost, optarg, sizeof(optServerHost));
 			break;
 		case 'n':
 			rc = sscanf(optarg, "%llu", &ull);
@@ -422,7 +458,7 @@ int main(int argc, char **argv)
 			optUseAtCert = 1;
 			break;
 		case 'e':
-			strncpy(optSecEntHost, optarg, INET_ADDRSTRLEN);
+			strncpy(optSecEntHost, optarg, sizeof(optSecEntHost));
 			break;
 		case 'f':
 			rc = sscanf(optarg, "%hu", &optSecEntPort);

@@ -57,7 +57,7 @@ void usage(const char *argv0)
    printf("   -p n                   Port number for plain-text HTTP (default is %d)\n", optProxyPlainPort);
    printf("   -rfc n                 Port number for RFC 8902 HTTP (default is %d)\n", optProxyRfc8902Port);
    printf("   -iso n                 Port number for ISO 21177 HTTP (default is %d)\n", optProxyRfc8902Port);
-	printf("   -se-host n             Security entity host name (default is %s)\n", optSecurityEntityAddress);
+	printf("   -se-host n             Security entity IPv4 address (default is %s)\n", optSecurityEntityAddress);
 	printf("   -se-port n             Security entity port number (default is %d)\n", optSecurityEntityPort);
    printf("   -rfc8902-aid n         Expected AID from client in RFC8902 (default %ld)\n", (long)optRfc8902Aid);
    printf("   -rfc8902-at            Use current AT certificate (default)\n");

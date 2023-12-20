@@ -211,11 +211,15 @@ void ProxyClient::handle_get_text(T handle, int size)
 {
 	const std::string source = "Q-Free is a prime mover in the world of smart, safe, and sustainable transportation management.\r\n";
 	std::string body;
+	int line = 1;
 	while ((int)body.size() < size) {
+		char szLine[20];
+		sprintf(szLine, "%06d: ", line);
+		body += szLine;
 		body += source;
+		line++;
 	}
-	if ((int)body.size() > size)
-		body = body.substr(0, size);
+	body += "EOF\r\n";
 
 	std::string hdr;
 	hdr += "HTTP/1.1 200 OK\r\n";

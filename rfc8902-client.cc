@@ -268,7 +268,9 @@ void client()
 		ERR_print_errors_fp(stderr);
 		exit(EXIT_FAILURE);
 	}
+
 	std::string ca_file = find_file("ca.cert.pem");
+#if 0
 	if (1 != SSL_CTX_load_verify_locations(ssl_ctx, ca_file.c_str(), NULL)) {
 		fprintf(stderr, "Unable to open %s\n", ca_file.c_str());
 		fprintf(stderr, "SSL_CTX_load_verify_locations failed: ");
@@ -276,6 +278,10 @@ void client()
 		exit(EXIT_FAILURE);
 	}
 	printf("Using CA file %s\n", ca_file.c_str());
+#else
+	fprintf(stderr, "Ignoring %s\n", ca_file.c_str());
+#endif
+
 	SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
     ssl = SSL_new(ssl_ctx);
     if (!ssl) {

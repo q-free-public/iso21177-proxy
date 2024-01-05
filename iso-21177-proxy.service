@@ -1,11 +1,13 @@
 [Unit]
 Wants=network.target
 After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+Restart=always
 
-ExecStart=/usr/bin/iso21177-proxy -v -p 8888
+ExecStart=/usr/bin/iso21177-proxy -v -v -p 8888
 
 [Install]
 WantedBy=multi-user.target

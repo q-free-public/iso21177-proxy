@@ -664,12 +664,24 @@ void ProxyClient::rfc8902_proc(SSL_CTX *ssl_ctx)
 		}
 
 		if (optVerbose) {
-			printf("Server shut down a TLS session ssl=%p.\n", ssl);
+			printf("Server will shut down a TLS session ssl=%p.\n", ssl);
 		}
 		retval = SSL_shutdown(ssl);
 		if (retval < 0) {
 			int ssl_err = SSL_get_error(ssl, retval);
 			fprintf(stderr, "Server SSL_shutdown failed: ssl_err=%d\n", ssl_err);
+		}
+		if (optVerbose) {
+			printf("Server will wait for a client shut down of a TLS session ssl=%p.\n", ssl);
+		}
+		// wait for client to confirm shutdown^M
+		retval = SSL_shutdown(ssl);
+		if (retval < 0) {
+			int ssl_err = SSL_get_error(ssl, retval);
+			fprintf(stderr, "Waiting for a client SSL_shutdown failed: ssl_err=%d\n", ssl_err);
+		}
+		if (optVerbose) {
+			printf("Server finished waiting for a client shut down of a TLS session ssl=%p.\n", ssl);
 		}
 	}
 

@@ -378,7 +378,17 @@ void client()
 		  int loopcnt = 0;
 	     while (true) {
 				int len = ssl_recv_message(ssl, buff, sizeof(buff));
-				if (len <= 0) break;
+				if (len <= 0) {
+					if (len < 0) {
+						ERR_print_errors_fp(stderr);
+						int ssl_error = SSL_get_error(ssl, len);
+						fprintf(stderr, "Error code %d str %s\n", ssl_error, ERR_error_string(ssl_error, NULL));
+						if (ssl_error == SSL_ERROR_SYSCALL) {
+							perror("syscall failed: ");
+						}
+					}
+					break;
+				}
 			   totlen += len;
 			   loopcnt++;
 			   printf("looping %d %d\n", totlen, loopcnt);

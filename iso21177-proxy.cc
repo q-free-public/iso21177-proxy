@@ -82,6 +82,7 @@ void create_rules()
 	rules.push_back(ProxyRule("/its1-100",         false, "its1.q-free.com",  8888, "/100.text"));
 	rules.push_back(ProxyRule("/its1-s",           true,  "its1.q-free.com",   443, "/index.html"));
 	rules.push_back(ProxyRule("/datex-speed.json", true,  "its1.q-free.com",   443, "/geoserver/speed.json"));
+	rules.push_back(ProxyRule("/datex-all.json",   true,  "its1.q-free.com",   443, "/geoserver/all.json"));
 }
 
 

@@ -371,10 +371,10 @@ void client()
     printf("Client shut down TLS session.\n");
 
 	 // Wait for the payload
+	int totlen = (int)remaining.size();
     if (retval != 1) {
         /* Consume all server's data to access the server's shutdown */
-	     char buff[1000-30];
-		  int totlen = (int)remaining.size();
+	     char buff[1000];
 		  int loopcnt = 0;
 	     while (true) {
 				int len = ssl_recv_message(ssl, buff, sizeof(buff));
@@ -404,11 +404,14 @@ void client()
     }
     printf("Client thinks a server shut down the TLS session.\n");
 
-    if (shutdown(client_socket, SHUT_RDWR)) {
-        perror("client shutdown failed");
-		exit(1);
+    if (headers.get_content_length() > 0) {
+       if (totlen == headers.get_content_length()) {
+          printf("Content length is matching, we have the complete file\n");
+       } else {
+          printf("Content length mismatch,  we got %d bytes, but exepected %d bytes\n", totlen, headers.get_content_length());
+          exit(1);
+       }
     }
-    printf("Client shut down TCP.\n");
 
     SSL_free(ssl);
     SSL_CTX_free(ssl_ctx);

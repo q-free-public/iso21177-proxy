@@ -256,9 +256,9 @@ void ProxyClient::handle_get_proxy(T handle, ConnectionClient *conn, const std::
 		return;
 	}
 
-	printf("GET %s from %s\n", rule.dst_file.c_str(), rule.dst_host.c_str());
+	printf("GET %s from %s using HTTP 1.0\n", rule.dst_file.c_str(), rule.dst_host.c_str());
 	char szHttpRequest[500];
-	sprintf(szHttpRequest, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", rule.dst_file.c_str(), rule.dst_host.c_str());
+	sprintf(szHttpRequest, "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", rule.dst_file.c_str(), rule.dst_host.c_str());
 	conn->send(szHttpRequest, strlen(szHttpRequest));
 
 	std::vector<unsigned char> body;

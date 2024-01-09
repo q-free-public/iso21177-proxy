@@ -31,7 +31,7 @@ void ProxyClient::client_proc()
          break;
       }
 		if (optVerbose > 1) {
-			//printf("proxyPlainClientProc: Len:%d  Header: %*.*s\n", len, len, len, buf);
+			printf("proxyPlainClientProc: Len:%d  Header: %*.*s\n", len, len, len, buf);
 		}
 		recvBytes += len;
 		headers.add_data(buf, len);
@@ -249,6 +249,9 @@ void ProxyClient::handle_get_bin(T handle, int size)
 template<typename T>
 void ProxyClient::handle_get_proxy(T handle, ConnectionClient *conn, const std::string &file, const ProxyRule &rule)
 {
+    if (optVerbose) {
+       printf("handle_get_proxy: Connecting to %s\n", rule.dst_host.c_str());
+    }
 	bool success = conn->connect(rule.dst_host, rule.dst_port);
 	if (!success) {
 		printf("Connection error to host %s\n", rule.dst_host.c_str());
@@ -260,6 +263,9 @@ void ProxyClient::handle_get_proxy(T handle, ConnectionClient *conn, const std::
 	char szHttpRequest[500];
 	sprintf(szHttpRequest, "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", rule.dst_file.c_str(), rule.dst_host.c_str());
 	conn->send(szHttpRequest, strlen(szHttpRequest));
+    if (optVerbose) {
+       printf("handle_get_proxy: Waiting for header from %s\n", rule.dst_host.c_str());
+    }
 
 	std::vector<unsigned char> body;
 	HttpHeaders headers;
@@ -289,7 +295,7 @@ void ProxyClient::handle_get_proxy(T handle, ConnectionClient *conn, const std::
 
    try {
       if (optVerbose) {
-			printf("handle_get_proxy.Header is complete\n");
+			printf("handle_get_proxy. Header is complete, %d lines\n", (int)headers.headerlines.size());
 			if (optVerbose > 1) {
 				for (auto &line : headers.headerlines) {
 					printf("%s\n", line.c_str());
@@ -307,6 +313,12 @@ void ProxyClient::handle_get_proxy(T handle, ConnectionClient *conn, const std::
 		for (auto &h : headers.headerlines) {
 			send(handle, (h + "\r\n").c_str(), h.size() + 2);
 		}
+        if (contLen > 0) {
+		    std::string sContentLength = "Content-Length: " + std::to_string(contLen) + "\r\n";
+		    send(handle, sContentLength.c_str(), sContentLength.size());
+        }
+		send(handle, "\r\n", 2);
+
 		send(handle, body.data(), body.size());
 		contLen -= body.size();
 
@@ -550,7 +562,7 @@ static int ssl_set_RFC8902_values(SSL *ssl, int server_support, int client_suppo
 void ProxyClient::rfc8902_proc(SSL_CTX *ssl_ctx)
 {
    if (optVerbose) {
-      printf("Starting proxyPlainClientProc fd=%d\n", fd);
+      printf("Starting rfc8902_proc fd=%d\n", fd);
    }
 
 	SSL *ssl = SSL_new(ssl_ctx);

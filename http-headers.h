@@ -3,6 +3,7 @@
 // This file is identical in projects:
 //   cits-lte-catm1-test
 //   cits-iso21177-proxy
+//   cits-iso21177-automotive
 //
 
 #include <string>
@@ -11,12 +12,19 @@
 
 class HttpHeaders {
 public:
+    HttpHeaders() {
+        clear();
+    }
+
 	std::vector<unsigned char> add_data(const char *buf, int len) {
 		for (int i=0; i<len; i++) {
 			if (buf[i] == '\n') {
+                // printf("Hdr: EOL '%s'  empty:%d\n", line.c_str(), line.empty());
+				if (line.empty()) {
+                    hdr_is_complete = true;
+					return std::vector<unsigned char>(buf + i + 1, buf + len);
+                }
 				headerlines.push_back(line);
-				if (line.empty())
-					return std::vector<unsigned char>(buf + i+1, buf + len);
 				line.clear();
 			} else if (buf[i] == '\r') {
 				// ignore
@@ -31,10 +39,11 @@ public:
 	void clear() {
 		headerlines.clear();
 		line.clear();
+        hdr_is_complete = false;
 	}
 
 	bool is_complete() {
-		return (!headerlines.empty() && headerlines.back().empty());
+		return (!headerlines.empty() && hdr_is_complete);
 	}
 
 	bool iequals(const std::string& a, const std::string& b)
@@ -133,4 +142,5 @@ public:
 
 	std::list<std::string> headerlines;
 	std::string line;
+    bool hdr_is_complete;
 };

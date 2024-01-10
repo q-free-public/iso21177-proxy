@@ -94,7 +94,12 @@ int ssl_recv_message(SSL *s, char * buff, size_t buff_len)
 	if (processed > 0) {
 		printf("SSL_read: max:%d  ret:%d\n%.*s\n", (int) buff_len, processed, processed, buff);
 	} else {
-		printf("SSL_read: Error  ret:%d\n", processed);
+		int err = SSL_get_error(s, processed);
+		if (err == SSL_ERROR_ZERO_RETURN) {
+			printf("SSL_read: End of file\n");
+		} else {
+			printf("SSL_read: Error:%d\n", err);
+		}
 	}
 	return processed;
 }
@@ -329,14 +334,6 @@ void client()
 	 HttpHeaders headers;
 	 std::vector<unsigned char> remaining;
     while (!headers.is_complete()) {
-
-		int ssl_error = SSL_get_error(ssl, processed);
-		ERR_print_errors_fp(stderr);
-		if (ssl_error) {
-			printf("Client thinks a server finished sending data\n");
-			ERR_print_errors_fp(stderr);
-		}
-
 	    if ((processed = ssl_recv_message(ssl, line, sizeof(line))) <= 0) {
 		    int ssl_error = SSL_get_error(ssl, processed);
 		    ERR_print_errors_fp(stderr);
@@ -353,13 +350,37 @@ void client()
 	    }
 
 		 remaining = headers.add_data(line, processed);
-	    printf("Client write finished. received %d bytes, Got %d surplus bytes (payload)\n", processed, (int)remaining.size());
+	    printf("Waiting for HTTP header, received %d bytes, Got %d surplus bytes (payload)\n", processed, (int)remaining.size());
     }
-	 
+
 	 printf("Reply protocol:       %s\n", headers.get_reply_protocol().c_str());
 	 printf("Reply status:         %d\n", headers.get_reply_status());
 	 printf("Reply content-length: %d\n", headers.get_content_length());
 	 printf("Reply content-type:   %s\n", headers.get_content_type().c_str());
+	 
+	 int totlen = (int)remaining.size();
+	 if (true) {
+	     char buff[1000];
+		  int loopcnt = 0;
+	     while (true) {
+				int len = ssl_recv_message(ssl, buff, sizeof(buff));
+				if (len <= 0) {
+					if (len < 0) {
+						ERR_print_errors_fp(stderr);
+						int ssl_error = SSL_get_error(ssl, len);
+						fprintf(stderr, "Error code %d str %s\n", ssl_error, ERR_error_string(ssl_error, NULL));
+						if (ssl_error == SSL_ERROR_SYSCALL) {
+							perror("syscall failed: ");
+						}
+					}
+					break;
+				}
+			   totlen += len;
+			   loopcnt++;
+			   printf("looping %d %d\n", totlen, loopcnt);
+        }
+		  printf("Client received %d bytes in %d loops(1).  ContentLen was %d bytes\n", totlen, loopcnt, headers.get_content_length());
+	 }
 
     retval = SSL_shutdown(ssl);
     if (retval < 0) {
@@ -368,10 +389,9 @@ void client()
 		ERR_print_errors_fp(stderr);
         exit(1);
     }
-    printf("Client shut down TLS session.\n");
+    printf("Client shut down TLS session retval=%d.\n", retval);
 
 	 // Wait for the payload
-	int totlen = (int)remaining.size();
     if (retval != 1) {
         /* Consume all server's data to access the server's shutdown */
 	     char buff[1000];
@@ -393,7 +413,7 @@ void client()
 			   loopcnt++;
 			   printf("looping %d %d\n", totlen, loopcnt);
         }
-		  printf("Client received %d bytes in %d loops.  ContentLen was %d bytes\n", totlen, loopcnt, headers.get_content_length());
+		  printf("Client received %d bytes in %d loops(1).  ContentLen was %d bytes\n", totlen, loopcnt, headers.get_content_length());
 
         retval = SSL_shutdown(ssl);
         if (retval != 1) {

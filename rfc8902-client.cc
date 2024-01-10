@@ -413,7 +413,7 @@ void client()
 			   loopcnt++;
 			   printf("looping %d %d\n", totlen, loopcnt);
         }
-		  printf("Client received %d bytes in %d loops(1).  ContentLen was %d bytes\n", totlen, loopcnt, headers.get_content_length());
+		  printf("Client received %d bytes in %d loops(2).  ContentLen was %d bytes\n", totlen, loopcnt, headers.get_content_length());
 
         retval = SSL_shutdown(ssl);
         if (retval != 1) {

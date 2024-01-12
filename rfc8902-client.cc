@@ -142,6 +142,15 @@ int ssl_print_1609_status(SSL *s)
 		return 0;
 	}
 
+	ssl_1609_cert_info_t certs[4];
+	if (SSL_get_1609_cert_chain(s, hashed_id, certs, sizeof(certs)) != 0) {
+           printf("Certificate chain information request was successfull\n");
+           for (unsigned int i=0; i<sizeof(certs)/sizeof(certs[0]) && certs[i].valid; i++) {
+	      print_hex_array(CERT_HASH_LEN, certs[i].hashedid);
+              printf(" %s %s %s\n", certs[i].valid_from, certs[i].valid_to, certs[i].id_name);
+           }
+        }
+	
 	return 1;
 }
 
